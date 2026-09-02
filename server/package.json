@@ -1,0 +1,20 @@
+{
+  "name": "pie-server",
+  "private": true,
+  "type": "module",
+  "version": "3.0.0",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "test": "node test/run.mjs",
+    "env:check": "node -e \"import('./src/env.js').then(m=>{const r=m.envReport();console.log(JSON.stringify(r,null,2))})\"",
+    "test:live": "node --test --test-concurrency=1 test/*.test.mjs"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "nodemailer": "^9.0.6"
+  }
+}

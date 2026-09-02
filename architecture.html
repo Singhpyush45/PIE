@@ -1,0 +1,931 @@
+<title>PIE System Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+
+<style>
+  /* ── tokens ───────────────────────────────────────────────────────────
+     Light is the base set. The two blocks below redefine only these values,
+     so no component ever reads a colour that exists in one theme only. */
+  :root {
+    --ground:      #FBFAF9;
+    --surface:     #FFFFFF;
+    --surface-sunk:#F2F1EE;
+    --line:        #DEDCD6;
+    --line-soft:   #EAE8E3;
+    --ink:         #171A1E;
+    --ink-2:       #4A5158;
+    --ink-3:       #767D84;
+
+    --accent:      #0E6E63;
+    --accent-soft: #E4F0EE;
+    --accent-line: #A8CFC9;
+
+    --live:        #2E7D4F;
+    --live-soft:   #E6F1EA;
+    --proposed:    #A9741C;
+    --proposed-soft:#F7EEDC;
+    --withheld:    #A33A2E;
+    --withheld-soft:#F7E6E3;
+
+    --shadow: 0 1px 2px rgba(23,26,30,.06);
+
+    --measure: 68ch;
+    --sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #15181C;
+      --surface:     #1B1F24;
+      --surface-sunk:#121519;
+      --line:        #2E343B;
+      --line-soft:   #252A30;
+      --ink:         #E9E7E3;
+      --ink-2:       #ADB4BB;
+      --ink-3:       #7C848C;
+
+      --accent:      #4FB3A6;
+      --accent-soft: #14312E;
+      --accent-line: #2A5B55;
+
+      --live:        #5FBE86;
+      --live-soft:   #16301F;
+      --proposed:    #D9A64E;
+      --proposed-soft:#312716;
+      --withheld:    #E07A6C;
+      --withheld-soft:#331C19;
+
+      --shadow: 0 1px 2px rgba(0,0,0,.4);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:      #15181C;
+    --surface:     #1B1F24;
+    --surface-sunk:#121519;
+    --line:        #2E343B;
+    --line-soft:   #252A30;
+    --ink:         #E9E7E3;
+    --ink-2:       #ADB4BB;
+    --ink-3:       #7C848C;
+
+    --accent:      #4FB3A6;
+    --accent-soft: #14312E;
+    --accent-line: #2A5B55;
+
+    --live:        #5FBE86;
+    --live-soft:   #16301F;
+    --proposed:    #D9A64E;
+    --proposed-soft:#312716;
+    --withheld:    #E07A6C;
+    --withheld-soft:#331C19;
+
+    --shadow: 0 1px 2px rgba(0,0,0,.4);
+  }
+
+  /* ── base ─────────────────────────────────────────────────────────── */
+  * { box-sizing: border-box; }
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 28px 96px;
+  }
+  .col { max-width: var(--measure); }
+
+  h1, h2, h3 { text-wrap: balance; margin: 0; font-weight: 600; letter-spacing: -0.011em; }
+  h1 { font-size: clamp(30px, 4.4vw, 44px); line-height: 1.12; letter-spacing: -0.022em; }
+  h2 { font-size: clamp(21px, 2.4vw, 26px); line-height: 1.22; }
+  h3 { font-size: 16px; line-height: 1.35; }
+  p  { margin: 0; }
+
+  .prose { font-family: var(--serif); font-size: 17px; line-height: 1.68; color: var(--ink-2); }
+  .prose strong { color: var(--ink); font-weight: 600; }
+  .lead { font-family: var(--serif); font-size: 19px; line-height: 1.6; color: var(--ink-2); }
+
+  .eyebrow {
+    font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-3); font-family: var(--sans);
+  }
+  code, .mono { font-family: var(--mono); font-size: .88em; }
+  code {
+    background: var(--surface-sunk);
+    border: 1px solid var(--line-soft);
+    border-radius: 3px;
+    padding: 1px 5px;
+    color: var(--ink);
+  }
+
+  /* ── masthead ─────────────────────────────────────────────────────── */
+  header.top {
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+    padding: 44px 0 38px;
+    margin-bottom: 56px;
+  }
+  header.top .wrap { padding-bottom: 0; }
+  .stamp {
+    display: inline-flex; align-items: baseline; gap: 10px;
+    font-size: 11px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--accent);
+    border: 1px solid var(--accent-line);
+    background: var(--accent-soft);
+    border-radius: 2px;
+    padding: 5px 10px;
+    margin-bottom: 22px;
+  }
+  .stamp .sep { color: var(--accent-line); }
+  .tagline {
+    margin-top: 20px;
+    font-family: var(--mono); font-size: 12.5px; color: var(--ink-3);
+    letter-spacing: .01em;
+  }
+
+  /* ── sections ─────────────────────────────────────────────────────── */
+  section { margin-top: 68px; }
+  section > .head { margin-bottom: 22px; }
+  section > .head h2 { margin-top: 6px; }
+  .stack { display: flex; flex-direction: column; gap: 18px; }
+
+  /* ── figures ──────────────────────────────────────────────────────── */
+  figure {
+    margin: 30px 0 0;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 26px 26px 20px;
+    box-shadow: var(--shadow);
+    overflow-x: auto;
+  }
+  figure svg { display: block; max-width: 100%; height: auto; color: var(--ink-2); }
+  figcaption {
+    margin-top: 18px; padding-top: 14px;
+    border-top: 1px solid var(--line-soft);
+    font-family: var(--serif); font-size: 14.5px; line-height: 1.6; color: var(--ink-3);
+    max-width: 74ch;
+  }
+
+  /* ── the withholding rule: a repeated mark, and it means one thing ── */
+  .boundary {
+    display: flex; align-items: center; gap: 14px;
+    margin: 26px 0;
+    font-family: var(--mono); font-size: 11.5px;
+    letter-spacing: .04em; text-transform: uppercase;
+    color: var(--withheld);
+  }
+  .boundary::before, .boundary::after {
+    content: ""; flex: 1; height: 0;
+    border-top: 1px dashed var(--withheld);
+    opacity: .5;
+  }
+
+  /* ── status chips ─────────────────────────────────────────────────── */
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
+    padding: 3px 8px; border-radius: 2px; white-space: nowrap;
+  }
+  .chip--live     { color: var(--live);     background: var(--live-soft); }
+  .chip--proposed { color: var(--proposed); background: var(--proposed-soft); }
+  .chip--future   { color: var(--ink-3);    background: var(--surface-sunk); }
+  .chip--withheld { color: var(--withheld); background: var(--withheld-soft); }
+
+  /* ── tables ───────────────────────────────────────────────────────── */
+  .tablewrap { overflow-x: auto; margin-top: 22px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+  thead th {
+    font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--ink-3); background: var(--surface-sunk); border-bottom: 1px solid var(--line);
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.num { font-variant-numeric: tabular-nums; text-align: right; }
+  td .mono { color: var(--ink-2); }
+
+  /* ── the layer rail: encodes the request path, so it is numbered ──── */
+  .layers { display: flex; flex-direction: column; gap: 0; margin-top: 24px;
+            border: 1px solid var(--line); border-radius: 4px; overflow: hidden; background: var(--surface); }
+  .layer { display: grid; grid-template-columns: 44px 1fr; gap: 0; border-bottom: 1px solid var(--line-soft); }
+  .layer:last-child { border-bottom: 0; }
+  .layer__n {
+    display: flex; align-items: flex-start; justify-content: center; padding: 16px 0 0;
+    font-family: var(--mono); font-size: 12px; color: var(--ink-3);
+    background: var(--surface-sunk); border-right: 1px solid var(--line-soft);
+    font-variant-numeric: tabular-nums;
+  }
+  .layer__body { padding: 15px 18px 16px; }
+  .layer__body h3 { margin-bottom: 4px; }
+  .layer__body p { font-size: 14.5px; color: var(--ink-2); line-height: 1.58; }
+  .layer__files { margin-top: 8px; font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); }
+
+  /* ── numbers row: only because these figures are the point ────────── */
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px;
+             background: var(--line); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; margin-top: 26px; }
+  .metric { background: var(--surface); padding: 16px 18px; }
+  .metric__v { font-size: 25px; font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+  .metric__l { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+
+  /* ── callout ──────────────────────────────────────────────────────── */
+  .note {
+    border-left: 2px solid var(--accent);
+    background: var(--accent-soft);
+    padding: 14px 18px;
+    border-radius: 0 3px 3px 0;
+    font-family: var(--serif); font-size: 15px; line-height: 1.62; color: var(--ink-2);
+  }
+  .note strong { color: var(--ink); }
+
+  .rule { height: 1px; background: var(--line); border: 0; margin: 0; }
+
+  ul.tight { margin: 0; padding-left: 20px; }
+  ul.tight li { margin-bottom: 7px; font-size: 14.5px; color: var(--ink-2); line-height: 1.58; }
+  ul.tight li:last-child { margin-bottom: 0; }
+
+  footer {
+    margin-top: 76px; padding-top: 24px; border-top: 1px solid var(--line);
+    font-size: 13px; color: var(--ink-3);
+  }
+
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+  @media (max-width: 640px) {
+    .wrap { padding: 0 18px 64px; }
+    figure { padding: 18px 16px 14px; }
+    .layer { grid-template-columns: 34px 1fr; }
+  }
+</style>
+
+<header class="top">
+  <div class="wrap">
+    <div class="stamp">
+      SAP Hackfest 2026 <span class="sep">/</span> Theme 2 <span class="sep">/</span> Inclusive Workforce
+    </div>
+    <h1>PIE Career Orchestrator</h1>
+    <p class="lead col" style="margin-top:14px">
+      A multi-agent hiring system whose scores are computed before any language model
+      is called, and whose matching agent is never given the attributes it must not use.
+      This is what is actually built, and what is not.
+    </p>
+    <p class="tagline">Potential over pedigree &nbsp;·&nbsp; AI recommends, recruiters decide</p>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- ══════════════════════════════════════════════ the thesis ══════ -->
+  <section style="margin-top:0">
+    <div class="head">
+      <div class="eyebrow">The load-bearing decision</div>
+      <h2>The model never touches a number</h2>
+    </div>
+    <div class="col stack">
+      <p class="prose">
+        Every capability score, match score, gap, bias signal and assessment result is
+        computed by plain deterministic JavaScript in <code>agents.js</code> — no model
+        involved, no randomness, same input, same output. Only once those numbers exist
+        is a language model asked to put them into readable English.
+      </p>
+      <p class="prose">
+        This is not a stylistic preference. It is what lets PIE answer the question a
+        hiring system has to answer: <strong>why</strong>. A recruiter can trace any
+        number back to the evidence item that produced it. Swapping the model — or
+        removing it entirely — changes the wording and not one figure.
+      </p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 900 320" role="img" aria-label="Evidence flows into a deterministic engine that produces scores; the scores then flow to a language model that only writes prose, and to the recruiter. No arrow returns from the model to the scores.">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+          </marker>
+          <marker id="ar-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#0E6E63"/>
+          </marker>
+        </defs>
+
+        <!-- evidence sources -->
+        <text x="20" y="28" font-size="11" font-family="IBM Plex Mono, monospace" fill="currentColor" opacity=".7">EVIDENCE</text>
+        <g font-size="12" font-family="IBM Plex Sans, sans-serif" fill="currentColor">
+          <rect x="20" y="42"  width="132" height="26" rx="2" fill="none" stroke="currentColor" stroke-opacity=".35"/>
+          <text x="30" y="59">Résumé</text>
+          <rect x="20" y="74"  width="132" height="26" rx="2" fill="none" stroke="currentColor" stroke-opacity=".35"/>
+          <text x="30" y="91">GitHub</text>
+          <rect x="20" y="106" width="132" height="26" rx="2" fill="none" stroke="currentColor" stroke-opacity=".35"/>
+          <text x="30" y="123">Projects</text>
+          <rect x="20" y="138" width="132" height="26" rx="2" fill="none" stroke="currentColor" stroke-opacity=".35"/>
+          <text x="30" y="155">Certificates</text>
+          <rect x="20" y="170" width="132" height="26" rx="2" fill="none" stroke="currentColor" stroke-opacity=".35"/>
+          <text x="30" y="187">Hackathons</text>
+          <rect x="20" y="202" width="132" height="26" rx="2" fill="none" stroke="currentColor" stroke-opacity=".35"/>
+          <text x="30" y="219">Assessment</text>
+        </g>
+
+        <!-- into the engine -->
+        <line x1="158" y1="135" x2="222" y2="135" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar)"/>
+
+        <!-- deterministic engine -->
+        <rect x="228" y="52" width="196" height="166" rx="3" fill="#0E6E63" fill-opacity=".07" stroke="#0E6E63" stroke-width="1.5"/>
+        <text x="326" y="76" font-size="12.5" font-family="IBM Plex Sans, sans-serif" font-weight="600" fill="#0E6E63" text-anchor="middle">Deterministic engine</text>
+        <text x="326" y="94" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="#0E6E63" text-anchor="middle" opacity=".85">agents.js</text>
+        <g font-size="11.5" font-family="IBM Plex Sans, sans-serif" fill="currentColor" text-anchor="middle">
+          <text x="326" y="121">Skills discovery</text>
+          <text x="326" y="140">Inclusive matching</text>
+          <text x="326" y="159">Learning pathway</text>
+          <text x="326" y="178">Bias audit</text>
+          <text x="326" y="197">Explainability</text>
+        </g>
+
+        <!-- scores -->
+        <line x1="430" y1="135" x2="494" y2="135" stroke="#0E6E63" stroke-width="1.6" marker-end="url(#ar-a)"/>
+        <text x="462" y="126" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="#0E6E63" text-anchor="middle">computes</text>
+
+        <rect x="500" y="98" width="150" height="74" rx="3" fill="none" stroke="#0E6E63" stroke-width="1.5"/>
+        <text x="575" y="122" font-size="12.5" font-family="IBM Plex Sans, sans-serif" font-weight="600" fill="#0E6E63" text-anchor="middle">Scores</text>
+        <text x="575" y="140" font-size="11" font-family="IBM Plex Sans, sans-serif" fill="currentColor" text-anchor="middle">final at this point</text>
+        <text x="575" y="157" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="currentColor" text-anchor="middle" opacity=".7">0.00–1.00</text>
+
+        <!-- to the model (read only) -->
+        <line x1="656" y1="118" x2="716" y2="88" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar)"/>
+        <text x="700" y="94" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="currentColor" text-anchor="end" opacity=".8">reads</text>
+
+        <rect x="722" y="44" width="156" height="60" rx="3" fill="none" stroke="currentColor" stroke-opacity=".45" stroke-dasharray="4 3"/>
+        <text x="800" y="68" font-size="12.5" font-family="IBM Plex Sans, sans-serif" font-weight="600" fill="currentColor" text-anchor="middle">Language model</text>
+        <text x="800" y="86" font-size="11" font-family="IBM Plex Sans, sans-serif" fill="currentColor" text-anchor="middle" opacity=".75">writes prose only</text>
+
+        <!-- the absent arrow, stated -->
+        <line x1="722" y1="126" x2="660" y2="126" stroke="#A33A2E" stroke-width="1.3" stroke-dasharray="3 4" opacity=".8"/>
+        <line x1="686" y1="118" x2="696" y2="134" stroke="#A33A2E" stroke-width="1.6"/>
+        <line x1="696" y1="118" x2="686" y2="134" stroke="#A33A2E" stroke-width="1.6"/>
+        <text x="800" y="130" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="#A33A2E" text-anchor="middle">cannot write back</text>
+
+        <!-- to recruiter -->
+        <line x1="656" y1="152" x2="716" y2="182" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar)"/>
+        <rect x="722" y="164" width="156" height="60" rx="3" fill="none" stroke="currentColor" stroke-opacity=".45"/>
+        <text x="800" y="188" font-size="12.5" font-family="IBM Plex Sans, sans-serif" font-weight="600" fill="currentColor" text-anchor="middle">Recruiter</text>
+        <text x="800" y="206" font-size="11" font-family="IBM Plex Sans, sans-serif" fill="currentColor" text-anchor="middle" opacity=".75">decides</text>
+
+        <!-- baseline note -->
+        <line x1="20" y1="262" x2="878" y2="262" stroke="currentColor" stroke-opacity=".18"/>
+        <text x="20" y="284" font-size="11" font-family="IBM Plex Mono, monospace" fill="currentColor" opacity=".65">
+          With no model configured the engine runs unchanged and the prose falls back to deterministic templates.
+        </text>
+        <text x="20" y="302" font-size="11" font-family="IBM Plex Mono, monospace" fill="currentColor" opacity=".65">
+          Every number on this diagram is identical either way.
+        </text>
+      </svg>
+      <figcaption>
+        The model sits downstream of the scores and has no path back to them. This is why
+        removing the AI layer entirely changes nothing a recruiter is shown as a figure —
+        and why PIE can explain any score without appealing to a model's judgement.
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ══════════════════════════════════════════ withheld inputs ══════ -->
+  <section>
+    <div class="head">
+      <div class="eyebrow">Fairness by construction</div>
+      <h2>What the matching agent is never given</h2>
+    </div>
+    <div class="col stack">
+      <p class="prose">
+        Inclusion is enforced at the interface, not by asking a model to behave. The
+        orchestrator hands the matching agent a role competency model and a set of skill
+        confidences. Nineteen attributes are removed before the call, so the agent cannot
+        weigh what it cannot see — and the Bias Audit service independently verifies that
+        they were absent.
+      </p>
+    </div>
+
+    <div class="boundary">withheld before the call</div>
+
+    <figure>
+      <svg viewBox="0 0 900 300" role="img" aria-label="A candidate record splits at a dashed boundary: nineteen prohibited attributes are dropped and never reach the matching agent, while skill confidences and the role competency model pass through.">
+        <defs>
+          <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+
+        <text x="20" y="26" font-size="11" font-family="IBM Plex Mono, monospace" fill="currentColor" opacity=".7">CANDIDATE RECORD</text>
+        <rect x="20" y="38" width="176" height="212" rx="3" fill="none" stroke="currentColor" stroke-opacity=".35"/>
+        <g font-size="11.5" font-family="IBM Plex Sans, sans-serif" fill="currentColor">
+          <text x="34" y="62">Skill confidences</text>
+          <text x="34" y="82">Evidence items</text>
+          <text x="34" y="102">Growth signals</text>
+          <text x="34" y="130" fill="#A33A2E">Institution tier</text>
+          <text x="34" y="150" fill="#A33A2E">Career break</text>
+          <text x="34" y="170" fill="#A33A2E">Gender, age</text>
+          <text x="34" y="190" fill="#A33A2E">City tier, caste</text>
+          <text x="34" y="210" fill="#A33A2E">Photo, accent</text>
+          <text x="34" y="234" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="#A33A2E" opacity=".85">+ 11 more</text>
+        </g>
+
+        <!-- the boundary -->
+        <line x1="290" y1="20" x2="290" y2="278" stroke="#A33A2E" stroke-width="1.4" stroke-dasharray="5 5" opacity=".75"/>
+        <text x="290" y="292" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="#A33A2E" text-anchor="middle">PROHIBITED_INPUTS</text>
+
+        <!-- passing through -->
+        <line x1="202" y1="80" x2="356" y2="112" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar2)"/>
+        <text x="250" y="86" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="currentColor" opacity=".8">passes</text>
+
+        <!-- dropped -->
+        <line x1="202" y1="172" x2="272" y2="172" stroke="#A33A2E" stroke-width="1.3"/>
+        <circle cx="286" cy="172" r="9" fill="none" stroke="#A33A2E" stroke-width="1.5"/>
+        <line x1="281" y1="167" x2="291" y2="177" stroke="#A33A2E" stroke-width="1.6"/>
+        <line x1="291" y1="167" x2="281" y2="177" stroke="#A33A2E" stroke-width="1.6"/>
+        <text x="238" y="164" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="#A33A2E" text-anchor="middle">dropped</text>
+
+        <!-- matching agent -->
+        <rect x="360" y="76" width="200" height="112" rx="3" fill="#0E6E63" fill-opacity=".07" stroke="#0E6E63" stroke-width="1.5"/>
+        <text x="460" y="102" font-size="12.5" font-family="IBM Plex Sans, sans-serif" font-weight="600" fill="#0E6E63" text-anchor="middle">Inclusive Matching</text>
+        <g font-size="11" font-family="IBM Plex Sans, sans-serif" fill="currentColor" text-anchor="middle">
+          <text x="460" y="126">skills-first score</text>
+          <text x="460" y="145">growth uplift</text>
+          <text x="460" y="164">gaps against the role</text>
+        </g>
+
+        <!-- audit verifies -->
+        <line x1="566" y1="132" x2="636" y2="132" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar2)"/>
+        <rect x="642" y="94" width="188" height="76" rx="3" fill="none" stroke="currentColor" stroke-opacity=".45"/>
+        <text x="736" y="120" font-size="12.5" font-family="IBM Plex Sans, sans-serif" font-weight="600" fill="currentColor" text-anchor="middle">Bias Audit</text>
+        <text x="736" y="140" font-size="11" font-family="IBM Plex Sans, sans-serif" fill="currentColor" text-anchor="middle" opacity=".8">verifies the exclusion</text>
+        <text x="736" y="158" font-size="11" font-family="IBM Plex Sans, sans-serif" fill="currentColor" text-anchor="middle" opacity=".8">independently</text>
+
+        <text x="20" y="272" font-size="11" font-family="IBM Plex Mono, monospace" fill="currentColor" opacity=".6">
+          The excluded set is held on the profile for accommodation and transparency — visible to the candidate, never to a scoring module.
+        </text>
+      </svg>
+      <figcaption>
+        The nineteen attributes are not merely down-weighted. They are absent from the
+        call, which is a property the Bias Audit service can check rather than a promise
+        the system makes about itself.
+      </figcaption>
+    </figure>
+
+    <div class="tablewrap col" style="max-width:none">
+      <table>
+        <thead>
+          <tr><th>Evidence source</th><th>Trust tier</th><th class="num">Confidence cap</th><th>Why capped there</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>GitHub</td><td><span class="chip chip--live">API-derived</span></td><td class="num">0.92</td><td>Read from the GitHub API, not from a claim</td></tr>
+          <tr><td>PIE assessment</td><td><span class="chip chip--live">API-derived</span></td><td class="num">0.90</td><td>Administered and scored by PIE itself</td></tr>
+          <tr><td>Certificate</td><td><span class="chip chip--proposed">Issuer-verified</span></td><td class="num">0.76</td><td>An issuer vouches for it; PIE did not observe the work</td></tr>
+          <tr><td>Project</td><td><span class="chip chip--future">Self-reported</span></td><td class="num">0.62</td><td>Described by the candidate</td></tr>
+          <tr><td>Hackathon</td><td><span class="chip chip--future">Self-reported</span></td><td class="num">0.58</td><td>Described by the candidate</td></tr>
+          <tr><td>Résumé</td><td><span class="chip chip--future">Self-reported</span></td><td class="num">0.50</td><td>The weakest evidence of capability PIE accepts</td></tr>
+          <tr><td>Non-traditional</td><td><span class="chip chip--future">Self-reported</span></td><td class="num">0.46</td><td>Counted, and counted honestly</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════ the stack ═══════ -->
+  <section>
+    <div class="head">
+      <div class="eyebrow">Request path</div>
+      <h2>The stack, in the order a request meets it</h2>
+    </div>
+    <div class="col">
+      <p class="prose">
+        One Node process serves both the API and the built frontend on a single port.
+        The numbering here is the actual sequence a request passes through, not a ranking.
+      </p>
+    </div>
+
+    <div class="layers">
+      <div class="layer">
+        <div class="layer__n">1</div>
+        <div class="layer__body">
+          <h3>React frontend</h3>
+          <p>Five workspaces — candidate, recruiter, Trust &amp; Integrity admin, SAP readiness, and a presenter mode. Compiled by Vite and served as static assets by the same process.</p>
+          <div class="layer__files">web/src · 7,389 lines</div>
+        </div>
+      </div>
+      <div class="layer">
+        <div class="layer__n">2</div>
+        <div class="layer__body">
+          <h3>Express routes</h3>
+          <p>Seven route modules behind session auth and role guards. Every candidate-facing serialiser is an allowlist, so a new field on an internal object cannot leak by default.</p>
+          <div class="layer__files">routes/{auth,candidate,recruiter,assessment,orchestration,github,admin}.js</div>
+        </div>
+      </div>
+      <div class="layer">
+        <div class="layer__n">3</div>
+        <div class="layer__body">
+          <h3>Orchestrator</h3>
+          <p>Runs the agent pipeline in dependency order. Each step declares what it reads, what it writes, what it is denied, and its human-oversight requirement; a missing dependency skips the step rather than crashing the run.</p>
+          <div class="layer__files">orchestrator.js</div>
+        </div>
+      </div>
+      <div class="layer">
+        <div class="layer__n">4</div>
+        <div class="layer__body">
+          <h3>Deterministic agents</h3>
+          <p>Skills discovery, market intelligence, employer readiness, inclusive matching, learning pathway, bias audit, explainability. Plain functions, no I/O, no model.</p>
+          <div class="layer__files">agents.js · pie-deterministic-1.3.0</div>
+        </div>
+      </div>
+      <div class="layer">
+        <div class="layer__n">5</div>
+        <div class="layer__body">
+          <h3>AI narration layer</h3>
+          <p>Reads the computed result and writes English. Provider order: SAP Generative AI Hub → OpenAI → Gemini → local Ollama → deterministic templates. The first configured one wins.</p>
+          <div class="layer__files">ai/agents.js · ai/provider.js</div>
+        </div>
+      </div>
+      <div class="layer">
+        <div class="layer__n">6</div>
+        <div class="layer__body">
+          <h3>Persistence</h3>
+          <p>A JSON store is the system of record. Supabase receives a write-behind mirror in dependency order, resolving foreign keys through a <code>legacy_id</code> column.</p>
+          <div class="layer__files">store.js · persistence/{mirror,supabase,checks}.js</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="metrics">
+      <div class="metric"><div class="metric__v">8,933</div><div class="metric__l">server lines</div></div>
+      <div class="metric"><div class="metric__v">7,389</div><div class="metric__l">frontend lines</div></div>
+      <div class="metric"><div class="metric__v">119</div><div class="metric__l">unit tests</div></div>
+      <div class="metric"><div class="metric__v">63</div><div class="metric__l">browser checks</div></div>
+      <div class="metric"><div class="metric__v">23</div><div class="metric__l">store collections</div></div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════ assessment ══════ -->
+  <section>
+    <div class="head">
+      <div class="eyebrow">Assessment engine</div>
+      <h2>Whose questions a candidate is asked</h2>
+    </div>
+    <div class="col stack">
+      <p class="prose">
+        PIE's default is that questions are generated from the job description and the
+        candidate's own evidence. That is a defensible default, not a mandate — a team
+        with a question set they trust can take the judgement back. The mode is set per
+        requisition and recorded on every attempt, because a score means something
+        different under each one.
+      </p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 900 268" role="img" aria-label="Three assessment modes fill the same six blueprint slots from different sources: FULL_AI uses generated questions topped up from the verified bank, HYBRID puts the recruiter's own questions first, and RECRUITER_ONLY uses nothing but the recruiter's questions, producing a shorter paper.">
+        <g font-family="IBM Plex Sans, sans-serif">
+          <!-- legend -->
+          <g font-size="11" fill="currentColor">
+            <rect x="20" y="16" width="12" height="12" rx="2" fill="#0E6E63" fill-opacity=".75"/>
+            <text x="38" y="26">AI-generated</text>
+            <rect x="140" y="16" width="12" height="12" rx="2" fill="currentColor" fill-opacity=".28"/>
+            <text x="158" y="26">Verified bank</text>
+            <rect x="258" y="16" width="12" height="12" rx="2" fill="#A9741C" fill-opacity=".8"/>
+            <text x="276" y="26">Recruiter's own</text>
+            <rect x="392" y="16" width="12" height="12" rx="2" fill="none" stroke="currentColor" stroke-opacity=".4" stroke-dasharray="3 2"/>
+            <text x="410" y="26">unfilled</text>
+          </g>
+
+          <!-- FULL_AI -->
+          <text x="20" y="70" font-size="12.5" font-weight="600" fill="currentColor">FULL_AI</text>
+          <text x="20" y="87" font-size="11" fill="currentColor" opacity=".7">generated from the job description</text>
+          <g>
+            <rect x="330" y="56" width="72" height="30" rx="2" fill="#0E6E63" fill-opacity=".75"/>
+            <rect x="410" y="56" width="72" height="30" rx="2" fill="#0E6E63" fill-opacity=".75"/>
+            <rect x="490" y="56" width="72" height="30" rx="2" fill="#0E6E63" fill-opacity=".75"/>
+            <rect x="570" y="56" width="72" height="30" rx="2" fill="#0E6E63" fill-opacity=".75"/>
+            <rect x="650" y="56" width="72" height="30" rx="2" fill="currentColor" fill-opacity=".28"/>
+            <rect x="730" y="56" width="72" height="30" rx="2" fill="currentColor" fill-opacity=".28"/>
+          </g>
+          <text x="818" y="76" font-size="11" fill="currentColor" opacity=".7">6 of 6</text>
+
+          <!-- HYBRID -->
+          <text x="20" y="140" font-size="12.5" font-weight="600" fill="currentColor">HYBRID</text>
+          <text x="20" y="157" font-size="11" fill="currentColor" opacity=".7">yours first, AI fills the rest</text>
+          <g>
+            <rect x="330" y="126" width="72" height="30" rx="2" fill="#A9741C" fill-opacity=".8"/>
+            <rect x="410" y="126" width="72" height="30" rx="2" fill="#A9741C" fill-opacity=".8"/>
+            <rect x="490" y="126" width="72" height="30" rx="2" fill="#A9741C" fill-opacity=".8"/>
+            <rect x="570" y="126" width="72" height="30" rx="2" fill="#0E6E63" fill-opacity=".75"/>
+            <rect x="650" y="126" width="72" height="30" rx="2" fill="#0E6E63" fill-opacity=".75"/>
+            <rect x="730" y="126" width="72" height="30" rx="2" fill="currentColor" fill-opacity=".28"/>
+          </g>
+          <text x="818" y="146" font-size="11" fill="currentColor" opacity=".7">6 of 6</text>
+
+          <!-- RECRUITER_ONLY -->
+          <text x="20" y="210" font-size="12.5" font-weight="600" fill="currentColor">RECRUITER_ONLY</text>
+          <text x="20" y="227" font-size="11" fill="currentColor" opacity=".7">nothing you did not write</text>
+          <g>
+            <rect x="330" y="196" width="72" height="30" rx="2" fill="#A9741C" fill-opacity=".8"/>
+            <rect x="410" y="196" width="72" height="30" rx="2" fill="#A9741C" fill-opacity=".8"/>
+            <rect x="490" y="196" width="72" height="30" rx="2" fill="#A9741C" fill-opacity=".8"/>
+            <rect x="570" y="196" width="72" height="30" rx="2" fill="none" stroke="currentColor" stroke-opacity=".4" stroke-dasharray="3 2"/>
+            <rect x="650" y="196" width="72" height="30" rx="2" fill="none" stroke="currentColor" stroke-opacity=".4" stroke-dasharray="3 2"/>
+            <rect x="730" y="196" width="72" height="30" rx="2" fill="none" stroke="currentColor" stroke-opacity=".4" stroke-dasharray="3 2"/>
+          </g>
+          <text x="818" y="216" font-size="11" fill="#A9741C">3 of 6</text>
+
+          <text x="20" y="256" font-size="11" font-family="IBM Plex Mono, monospace" fill="currentColor" opacity=".6">
+            A short pool produces a short paper, and the blueprint records that it did — rather than quietly reaching for a question the recruiter excluded.
+          </text>
+        </g>
+      </svg>
+      <figcaption>
+        The same six blueprint slots, filled from different sources. Two candidates for
+        one role always get different questions and the same competencies — different
+        subjects would make their scores incomparable.
+      </figcaption>
+    </figure>
+
+    <div class="col stack" style="margin-top:28px">
+      <p class="prose">
+        Every generated question is a candidate for inclusion, never a question. It passes
+        schema, answer-key, ambiguity, relevance and duplicate checks before a candidate
+        can see it. A question that fails is replaced, not repaired.
+      </p>
+      <div class="note">
+        <strong>Coding answers are scored by running them.</strong> The previous grader matched
+        rubric keywords in the text, and it was not merely weak — it was backwards: pasting the
+        rubric's own words as a comment scored 100%, while a correct solution phrased differently
+        scored 0. Keyword scoring is gone.
+      </div>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 900 250" role="img" aria-label="Candidate code travels from the browser to the PIE server, which writes it to a temporary directory and starts a throwaway container with no network and a read-only filesystem. Only a pass or fail verdict returns. The server process never executes the code.">
+        <defs>
+          <marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+
+        <rect x="20" y="80" width="130" height="58" rx="3" fill="none" stroke="currentColor" stroke-opacity=".45"/>
+        <text x="85" y="105" font-size="12.5" font-family="IBM Plex Sans, sans-serif" font-weight="600" fill="currentColor" text-anchor="middle">Browser</text>
+        <text x="85" y="123" font-size="11" font-family="IBM Plex Sans, sans-serif" fill="currentColor" text-anchor="middle" opacity=".75">candidate's code</text>
+
+        <line x1="156" y1="109" x2="216" y2="109" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar3)"/>
+
+        <rect x="222" y="80" width="150" height="58" rx="3" fill="none" stroke="currentColor" stroke-opacity=".45"/>
+        <text x="297" y="105" font-size="12.5" font-family="IBM Plex Sans, sans-serif" font-weight="600" fill="currentColor" text-anchor="middle">PIE server</text>
+        <text x="297" y="123" font-size="11" font-family="IBM Plex Sans, sans-serif" fill="currentColor" text-anchor="middle" opacity=".75">writes spec to /tmp</text>
+
+        <line x1="378" y1="109" x2="446" y2="109" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar3)"/>
+        <text x="412" y="100" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="currentColor" text-anchor="middle" opacity=".8">spawns</text>
+
+        <!-- container -->
+        <rect x="452" y="40" width="264" height="140" rx="3" fill="#0E6E63" fill-opacity=".06" stroke="#0E6E63" stroke-width="1.5" stroke-dasharray="6 4"/>
+        <text x="584" y="64" font-size="12.5" font-family="IBM Plex Sans, sans-serif" font-weight="600" fill="#0E6E63" text-anchor="middle">Throwaway container</text>
+        <g font-size="10.5" font-family="IBM Plex Mono, monospace" fill="currentColor" text-anchor="middle" opacity=".85">
+          <text x="584" y="87">--network=none</text>
+          <text x="584" y="105">--read-only</text>
+          <text x="584" y="123">--cap-drop=ALL · uid 65534</text>
+          <text x="584" y="141">256m · 64 pids · 10s</text>
+          <text x="584" y="164">no environment variables</text>
+        </g>
+
+        <line x1="722" y1="109" x2="782" y2="109" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar3)"/>
+        <rect x="788" y="80" width="92" height="58" rx="3" fill="none" stroke="currentColor" stroke-opacity=".45"/>
+        <text x="834" y="105" font-size="12" font-family="IBM Plex Sans, sans-serif" font-weight="600" fill="currentColor" text-anchor="middle">Verdict</text>
+        <text x="834" y="123" font-size="11" font-family="IBM Plex Sans, sans-serif" fill="currentColor" text-anchor="middle" opacity=".75">pass / fail</text>
+
+        <!-- what does not happen -->
+        <line x1="20" y1="206" x2="880" y2="206" stroke="currentColor" stroke-opacity=".18"/>
+        <text x="20" y="228" font-size="11" font-family="IBM Plex Mono, monospace" fill="#A33A2E">
+          Never in the server process: a child there inherits its environment — the Supabase service key, the model keys, the session secret.
+        </text>
+        <text x="20" y="244" font-size="11" font-family="IBM Plex Mono, monospace" fill="currentColor" opacity=".6">
+          With no sandbox available the answer is recorded for recruiter review, unscored — never given a number PIE cannot compute.
+        </text>
+      </svg>
+      <figcaption>
+        Hidden test cases never reach the browser in any form: not in the question payload,
+        and not in the per-answer results after submission. The candidate is told how many
+        exist, which is fair, and not what they contain, which would not be.
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ══════════════════════════════════════════════ integrity ═══════ -->
+  <section>
+    <div class="head">
+      <div class="eyebrow">Assessment integrity</div>
+      <h2>Defence in depth, and its limits stated</h2>
+    </div>
+    <div class="col stack">
+      <p class="prose">
+        Face presence checks run in the browser using a 6&nbsp;KB detector and its cascade,
+        both served by the app — no CDN, so they work offline. PIE counts faces and measures
+        how far the detected face moved between checks. There is no face recognition, no
+        matching against a stored photo, and nothing about appearance is computed or stored.
+      </p>
+      <p class="prose">
+        A signal must hold for roughly two seconds before it is raised, with a twenty-second
+        cooldown. With the breach threshold at three, a detector that complained on one bad
+        frame would lock honest candidates out of their own assessment.
+      </p>
+      <div class="note">
+        <strong>Reaching the threshold stops the attempt for human review. It never rejects anyone.</strong>
+        The product describes itself as defence-in-depth assessment integrity — not as cheat-proof.
+        Browser signals cannot see a second device, a person off camera, notes on paper,
+        OS-level automation or a virtual machine, and PIE says so on the consent screen
+        before a candidate agrees to anything.
+      </div>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Signal</th><th>Detected by</th><th>Counts as a breach</th></tr></thead>
+        <tbody>
+          <tr><td>More than one face in frame</td><td class="mono">sustained face count &gt; 1</td><td><span class="chip chip--withheld">yes</span></td></tr>
+          <tr><td>No face in frame</td><td class="mono">no face after grace period</td><td><span class="chip chip--withheld">yes</span></td></tr>
+          <tr><td>Person in frame appears to change</td><td class="mono">abrupt geometry shift</td><td><span class="chip chip--withheld">yes</span></td></tr>
+          <tr><td>Left the assessment window</td><td class="mono">visibility / focus event</td><td><span class="chip chip--withheld">yes</span></td></tr>
+          <tr><td>Fullscreen exited</td><td class="mono">fullscreenchange</td><td><span class="chip chip--withheld">yes</span></td></tr>
+          <tr><td>Screen sharing stopped</td><td class="mono">display track ended</td><td><span class="chip chip--withheld">yes</span></td></tr>
+          <tr><td>Camera or microphone lost</td><td class="mono">track ended</td><td><span class="chip chip--withheld">yes</span></td></tr>
+          <tr><td>Paste into the answer box</td><td class="mono">paste / drop event</td><td><span class="chip chip--future">recorded only</span></td></tr>
+          <tr><td>Connection interrupted</td><td class="mono">heartbeat missed</td><td><span class="chip chip--future">recorded only</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="prose col" style="margin-top:16px; font-size:15px">
+      A blocked paste may be a prepared answer, or a candidate moving their own draft between
+      windows. PIE cannot tell those apart from a paste event, so it records the fact and
+      counts nothing.
+    </p>
+  </section>
+
+  <!-- ══════════════════════════════════════════════ persistence ═════ -->
+  <section>
+    <div class="head">
+      <div class="eyebrow">Data</div>
+      <h2>One system of record, one mirror</h2>
+    </div>
+    <div class="col">
+      <p class="prose">
+        The JSON store is authoritative. Supabase receives writes in the background so the
+        enterprise path is real rather than described — but nothing reads from it yet, and
+        the SAP readiness page says exactly that rather than implying a live database.
+      </p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 900 210" role="img" aria-label="Application writes go to the JSON store, which is the system of record and the only source the application reads from. A change feed pushes the same writes to Supabase in dependency order; no arrow returns from Supabase to the application.">
+        <defs>
+          <marker id="ar4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+
+        <rect x="20" y="66" width="150" height="62" rx="3" fill="none" stroke="currentColor" stroke-opacity=".45"/>
+        <text x="95" y="92" font-size="12.5" font-family="IBM Plex Sans, sans-serif" font-weight="600" fill="currentColor" text-anchor="middle">Application</text>
+        <text x="95" y="111" font-size="11" font-family="IBM Plex Sans, sans-serif" fill="currentColor" text-anchor="middle" opacity=".75">routes + agents</text>
+
+        <line x1="176" y1="86" x2="250" y2="86" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar4)"/>
+        <text x="213" y="78" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="currentColor" text-anchor="middle" opacity=".8">writes</text>
+        <line x1="250" y1="110" x2="176" y2="110" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar4)"/>
+        <text x="213" y="126" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="currentColor" text-anchor="middle" opacity=".8">reads</text>
+
+        <rect x="256" y="56" width="176" height="82" rx="3" fill="#0E6E63" fill-opacity=".07" stroke="#0E6E63" stroke-width="1.5"/>
+        <text x="344" y="84" font-size="12.5" font-family="IBM Plex Sans, sans-serif" font-weight="600" fill="#0E6E63" text-anchor="middle">JSON store</text>
+        <text x="344" y="103" font-size="11" font-family="IBM Plex Sans, sans-serif" fill="currentColor" text-anchor="middle">system of record</text>
+        <text x="344" y="121" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="currentColor" text-anchor="middle" opacity=".7">23 collections</text>
+
+        <line x1="438" y1="97" x2="516" y2="97" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar4)"/>
+        <text x="477" y="89" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="currentColor" text-anchor="middle" opacity=".8">change feed</text>
+
+        <rect x="522" y="56" width="164" height="82" rx="3" fill="none" stroke="currentColor" stroke-opacity=".45"/>
+        <text x="604" y="84" font-size="12.5" font-family="IBM Plex Sans, sans-serif" font-weight="600" fill="currentColor" text-anchor="middle">Write-behind mirror</text>
+        <text x="604" y="103" font-size="11" font-family="IBM Plex Sans, sans-serif" fill="currentColor" text-anchor="middle" opacity=".8">dependency order</text>
+        <text x="604" y="121" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="currentColor" text-anchor="middle" opacity=".7">legacy_id → uuid</text>
+
+        <line x1="692" y1="97" x2="750" y2="97" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar4)"/>
+        <rect x="756" y="56" width="124" height="82" rx="3" fill="none" stroke="currentColor" stroke-opacity=".45"/>
+        <text x="818" y="84" font-size="12.5" font-family="IBM Plex Sans, sans-serif" font-weight="600" fill="currentColor" text-anchor="middle">Supabase</text>
+        <text x="818" y="103" font-size="11" font-family="IBM Plex Sans, sans-serif" fill="currentColor" text-anchor="middle" opacity=".8">27 tables</text>
+        <text x="818" y="121" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="currentColor" text-anchor="middle" opacity=".7">47 RLS policies</text>
+
+        <!-- the absent read path -->
+        <line x1="756" y1="160" x2="440" y2="160" stroke="#A33A2E" stroke-width="1.3" stroke-dasharray="3 4" opacity=".8"/>
+        <line x1="592" y1="152" x2="602" y2="168" stroke="#A33A2E" stroke-width="1.6"/>
+        <line x1="602" y1="152" x2="592" y2="168" stroke="#A33A2E" stroke-width="1.6"/>
+        <text x="818" y="180" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="#A33A2E" text-anchor="middle">nothing reads back yet</text>
+      </svg>
+      <figcaption>
+        A mirror that fails degrades rather than blocks: a column the database does not
+        have is dropped and reported once, and the write proceeds without it.
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ══════════════════════════════════════════════ SAP ═════════════ -->
+  <section>
+    <div class="head">
+      <div class="eyebrow">SAP ecosystem</div>
+      <h2>What is wired, and what is not</h2>
+    </div>
+    <div class="col">
+      <p class="prose">
+        Every state below is read from its adapter at request time. PIE never claims a live
+        SAP integration unless credentials, endpoints and actual connectivity exist — and
+        the readiness page in the product shows the same states this table does.
+      </p>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Service</th><th>Classification</th><th>What exists today</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>SAP Generative AI Hub</td>
+            <td><span class="chip chip--live">Confirmed</span></td>
+            <td>Adapter wired and first in the provider order; activates the moment a deployment URL and token are present.</td>
+          </tr>
+          <tr>
+            <td>SAP Learning Hub, student edition</td>
+            <td><span class="chip chip--live">Confirmed</span></td>
+            <td>Skill gaps map to learning objectives and hand the candidate off to learning.sap.com. No enrolment or completion API is claimed.</td>
+          </tr>
+          <tr>
+            <td>SAP BTP / CAP</td>
+            <td><span class="chip chip--proposed">Proposed</span></td>
+            <td>Adapter interface implemented. No subaccount or CAP endpoint provisioned; PIE Core runs standalone.</td>
+          </tr>
+          <tr>
+            <td>SAP HANA Cloud</td>
+            <td><span class="chip chip--proposed">Proposed</span></td>
+            <td>Adapter interface implemented. No instance provisioned; the JSON store remains the system of record.</td>
+          </tr>
+          <tr>
+            <td>SAP Analytics Cloud</td>
+            <td><span class="chip chip--proposed">Recommended</span></td>
+            <td>Intended destination for cohort placement-readiness and skill-gap analytics. Rendered in-app today.</td>
+          </tr>
+          <tr>
+            <td>SuccessFactors / Talent Intelligence Hub</td>
+            <td><span class="chip chip--future">Future</span></td>
+            <td>Not implemented. Requires a tenant and validated API scopes.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note col" style="margin-top:24px; max-width:none">
+      <strong>What PIE contributes to an SAP talent stack.</strong> Not another applicant tracker.
+      An evidence layer that turns résumés, repositories, certificates, hackathons and an
+      administered assessment into skill confidences with named provenance — then matches on
+      those alone, audits itself for bias, and hands a human the reasoning rather than a ranking.
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════ verification ════ -->
+  <section>
+    <div class="head">
+      <div class="eyebrow">How this is kept true</div>
+      <h2>Verification</h2>
+    </div>
+    <div class="col stack">
+      <p class="prose">
+        The claims on this page are properties the test suite checks, not intentions. The
+        suite runs each file in its own process against a throwaway server and data
+        directory, so a shared demo reset in one file cannot corrupt another.
+      </p>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Suite</th><th class="num">Checks</th><th>What it holds to</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">auth · flows</td><td class="num">43</td><td>Role isolation, demo/real separation, no secret on any authenticated surface</td></tr>
+          <tr><td class="mono">assessment</td><td class="num">17</td><td>Competency equivalence between candidates, anti-repetition, hidden tests never serialised</td></tr>
+          <tr><td class="mono">execution</td><td class="num">9</td><td>Every container isolation flag present; a candidate cannot forge a verdict</td></tr>
+          <tr><td class="mono">facedetect · facewatch</td><td class="num">11</td><td>One person stays one person across frames; a single bad frame is never a breach</td></tr>
+          <tr><td class="mono">brief</td><td class="num">6</td><td>No name, institution or history reaches the narrator; the reviewer's note never reaches the candidate</td></tr>
+          <tr><td class="mono">supabase · checks</td><td class="num">33</td><td>Mirror shape, graceful degradation, verification survives a restart</td></tr>
+          <tr><td class="mono">browser walks</td><td class="num">63</td><td>Every screen and every tab mounts; nothing clipped at 390&nbsp;px</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="prose col" style="margin-top:18px; font-size:15px">
+      Each of these was written after a real failure, and several were verified by
+      deliberately reintroducing the bug to confirm the test fails.
+    </p>
+  </section>
+
+  <footer>
+    <div class="col">
+      PIE Career Orchestrator · Team Vision Nexus, Galgotias University ·
+      SAP Hackfest 2026, Theme 2: Inclusive Workforce.
+      Figures reflect the codebase at <span class="mono">F:\PIE_V3</span>.
+    </div>
+  </footer>
+
+</div>

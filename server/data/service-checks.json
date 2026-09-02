@@ -1,0 +1,44 @@
+{
+  "smtp": {
+    "ok": true,
+    "detail": "credentials accepted",
+    "config": "797dc5258148fae6",
+    "meta": null,
+    "at": "2026-08-31T17:25:02.027Z"
+  },
+  "supabase": {
+    "ok": true,
+    "detail": "Connected to ahvdxtujykurxnsnzwha.supabase.co. All 20 PIE tables present.",
+    "config": "1ab79a6e79393ddd",
+    "meta": {
+      "configured": true,
+      "host": "ahvdxtujykurxnsnzwha.supabase.co",
+      "tables": [
+        "profiles",
+        "organizations",
+        "recruiter_profiles",
+        "candidate_profiles",
+        "requisitions",
+        "applications",
+        "evidence",
+        "github_connections",
+        "github_repositories",
+        "projects",
+        "certificates",
+        "hackathons",
+        "agent_runs",
+        "match_results",
+        "assessment_attempts",
+        "proctoring_events",
+        "bias_audits",
+        "human_decisions",
+        "learning_progress",
+        "audit_events"
+      ],
+      "missing": [],
+      "state": "CONNECTED",
+      "detail": "Connected to ahvdxtujykurxnsnzwha.supabase.co. All 20 PIE tables present."
+    },
+    "at": "2026-08-31T17:25:52.469Z"
+  }
+}
