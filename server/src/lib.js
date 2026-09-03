@@ -89,8 +89,24 @@ export function readableProfile(req, profileId) {
 
 /* ------------------------------------------------------ rate limiting (light) */
 const hits = new Map();
+/**
+ * A simple fixed-window limiter.
+ *
+ * Keyed by the SIGNED-IN ACCOUNT where there is one, and only by IP otherwise.
+ * That distinction matters more than it looks: behind a proxy — Render's
+ * included — every candidate on the same deployment can arrive with the same
+ * `req.ip`, so an IP-keyed limit on an authenticated endpoint is really a
+ * limit shared by everyone at once. Two people registering their identity in
+ * the same minute would lock out the third, and the message they would see is
+ * "slow down", which tells them nothing about what actually happened.
+ *
+ * For unauthenticated endpoints (sign-in, registration, password reset) IP is
+ * still the right key, because there is no account to attribute the request to
+ * and abuse there is exactly what a per-IP limit is for.
+ */
 export const rateLimit = (max, windowMs) => (req, res, next) => {
-  const key = `${req.ip}:${req.route?.path || req.path}`;
+  const who = req.user?.id ? `u:${req.user.id}` : `ip:${req.ip}`;
+  const key = `${who}:${req.route?.path || req.path}`;
   const now = Date.now();
   const rec = hits.get(key) || { n: 0, reset: now + windowMs };
   if (now > rec.reset) { rec.n = 0; rec.reset = now + windowMs; }
@@ -136,6 +152,10 @@ export const sessionUser = u => ({
   recruiterId: u.recruiterId || null,
   // True only for the curated Grand Finale personas, never for a real account.
   isDemo: Boolean(u.isDemo),
+  // The frontend uses this to show what is still outstanding. It is a mirror of
+  // the server's decision, never the basis for one — every gate is enforced
+  // server-side, where a browser cannot reach it.
+  emailVerified: Boolean(u.emailVerified) || Boolean(u.isDemo),
 });
 
 export const publicProfile = p => ({

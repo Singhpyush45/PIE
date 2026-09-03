@@ -209,6 +209,9 @@ function Register({ role, onBack, onSignedIn, onSignIn }) {
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  // Set when the server says the address has to be proven before the account
+  // exists in any usable sense. Holds the ticket it issued — never the code.
+  const [verify, setVerify] = useState(null);
   const set = (k, v) => setF(x => ({ ...x, [k]: v }));
 
   const accountReady = f.name.trim().length >= 2 && f.username.trim().length >= 3
@@ -223,13 +226,40 @@ function Register({ role, onBack, onSignedIn, onSignIn }) {
     setBusy(true); setError(null);
     try {
       const r = await api.register({ role, ...f });
+      if (r.requiresEmailVerification) {
+        // No token and no user came back, because there is no session yet.
+        setVerify({ email: r.email || f.email, ticket: r.ticket || null });
+        setBusy(false);
+        return;
+      }
       setToken(r.token);
       onSignedIn(r.user);
     } catch (err) {
+      // The account may exist even when the code could not be sent. Move to the
+      // verification screen anyway, where "Resend" is the obvious next step —
+      // sending them back to a filled-in form that now says "username taken"
+      // would be a dead end.
+      if (err.data?.requiresEmailVerification) {
+        setVerify({ email: err.data.email || f.email, ticket: null, mailFailed: true });
+        setBusy(false);
+        return;
+      }
       setError(err.message);
       setBusy(false);
       setStep(1);
     }
+  }
+
+  if (verify) {
+    return (
+      <VerifyEmail
+        email={verify.email}
+        ticket={verify.ticket}
+        mailFailed={verify.mailFailed}
+        onVerified={u => onSignedIn(u)}
+        onBack={() => { setVerify(null); setStep(1); }}
+      />
+    );
   }
 
   return (
@@ -501,6 +531,172 @@ function Forgot({ role, onBack }) {
 
         <p className="t-11 faint" style={{ margin: 0, lineHeight: 1.5 }}>
           For your safety we give the same answer whether or not an account exists for that address.
+        </p>
+      </form>
+    </Panel>
+  );
+}
+
+
+/* ========================================================= VERIFY EMAIL (OTP)
+   The account exists but is not usable until the address is proven. Everything
+   that decides that lives on the server; this screen only collects four digits
+   and reports what the server said.
+
+   The code is never held anywhere but this component's state, and never written
+   to storage — a verification code in localStorage is a verification code an
+   extension can read. */
+function VerifyEmail({ email, ticket, mailFailed, onVerified, onBack }) {
+  const LEN = 4;
+  const [digits, setDigits] = useState(Array(LEN).fill(''));
+  const [busy, setBusy] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [error, setError] = useState(mailFailed
+    ? { title: 'The code could not be sent', message: 'Your account was created, but the email did not go out. Ask for a new code below.' }
+    : null);
+  const [notice, setNotice] = useState(null);
+  const [attemptsLeft, setAttemptsLeft] = useState(null);
+  const [cooldown, setCooldown] = useState(mailFailed ? 0 : 60);
+  const [held, setHeld] = useState(ticket);
+  const boxes = React.useRef([]);
+
+  const code = digits.join('');
+  const complete = code.length === LEN && /^\d+$/.test(code);
+  const burnt = attemptsLeft === 0;
+
+  useEffect(() => {
+    if (!cooldown) return undefined;
+    const t = setInterval(() => setCooldown(c => (c > 0 ? c - 1 : 0)), 1000);
+    return () => clearInterval(t);
+  }, [cooldown]);
+
+  useEffect(() => { boxes.current[0]?.focus(); }, []);
+
+  function put(i, raw) {
+    const only = raw.replace(/\D/g, '');
+    if (!only) { setDigits(d => { const n = [...d]; n[i] = ''; return n; }); return; }
+    // A pasted code fills the row rather than dropping all but the first digit.
+    setDigits(d => {
+      const n = [...d];
+      for (let k = 0; k < only.length && i + k < LEN; k += 1) n[i + k] = only[k];
+      return n;
+    });
+    const next = Math.min(i + only.length, LEN - 1);
+    boxes.current[next]?.focus();
+  }
+
+  function onKey(i, e) {
+    if (e.key === 'Backspace' && !digits[i] && i > 0) {
+      boxes.current[i - 1]?.focus();
+      setDigits(d => { const n = [...d]; n[i - 1] = ''; return n; });
+    }
+    if (e.key === 'ArrowLeft' && i > 0) boxes.current[i - 1]?.focus();
+    if (e.key === 'ArrowRight' && i < LEN - 1) boxes.current[i + 1]?.focus();
+  }
+
+  async function submit(e) {
+    e?.preventDefault();
+    if (!complete || busy) return;
+    setBusy(true); setError(null); setNotice(null);
+    try {
+      const r = await api.confirmEmailCode({ email, code, ticket: held });
+      setToken(r.token);
+      onVerified(r.user);
+    } catch (err) {
+      const d = err.data || {};
+      if (typeof d.attemptsLeft === 'number') setAttemptsLeft(d.attemptsLeft);
+      setError({
+        title: {
+          EXPIRED: 'That code has expired',
+          TOO_MANY_ATTEMPTS: 'Too many attempts',
+          TICKET_INVALID: 'Start again in this browser',
+          NO_CODE: 'No code is waiting',
+        }[d.reason] || 'That code was not accepted',
+        message: err.message,
+      });
+      setDigits(Array(LEN).fill(''));
+      boxes.current[0]?.focus();
+      setBusy(false);
+    }
+  }
+
+  async function resend() {
+    setResending(true); setError(null); setNotice(null);
+    try {
+      const r = await api.requestEmailCode(email);
+      if (r.ticket) setHeld(r.ticket);
+      setNotice(r.notice || 'A new code is on its way.');
+      setDigits(Array(LEN).fill(''));
+      setAttemptsLeft(null);
+      setCooldown(60);
+      boxes.current[0]?.focus();
+    } catch (err) {
+      const d = err.data || {};
+      setError({
+        title: d.reason === 'MAIL_NOT_CONFIGURED' ? 'Email is not available here' : 'Could not send a new code',
+        message: err.message,
+      });
+      if (d.reason === 'COOLDOWN') setCooldown(60);
+    }
+    setResending(false);
+  }
+
+  return (
+    <Panel onBack={onBack} title="Verify your email"
+      sub="Your account is not active until this address is confirmed">
+      <form onSubmit={submit} className="stack">
+        {error && <Alert tone="crit" title={error.title}>{error.message}</Alert>}
+        {notice && !error && <Alert tone="ok" title="Sent" icon="check">{notice}</Alert>}
+
+        <p className="t-13 muted" style={{ margin: 0, lineHeight: 1.6 }}>
+          We have sent a {LEN}-digit verification code to<br />
+          <strong style={{ color: 'var(--fg)' }}>{email}</strong>
+        </p>
+
+        <div style={{ display: 'flex', gap: 'var(--s-3)', justifyContent: 'center', margin: 'var(--s-2) 0' }}>
+          {digits.map((d, i) => (
+            <input
+              key={i}
+              ref={el => { boxes.current[i] = el; }}
+              className="input"
+              inputMode="numeric"
+              autoComplete={i === 0 ? 'one-time-code' : 'off'}
+              aria-label={`Digit ${i + 1} of ${LEN}`}
+              maxLength={LEN}
+              disabled={busy || burnt}
+              value={d}
+              onChange={e => put(i, e.target.value)}
+              onKeyDown={e => onKey(i, e)}
+              style={{
+                width: 58, height: 64, textAlign: 'center',
+                fontSize: 26, fontWeight: 600, letterSpacing: 0,
+                fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+              }}
+            />
+          ))}
+        </div>
+
+        {attemptsLeft !== null && attemptsLeft > 0 && (
+          <p className="t-12 muted" style={{ margin: 0, textAlign: 'center' }}>
+            {attemptsLeft} attempt{attemptsLeft === 1 ? '' : 's'} remaining before this code is retired.
+          </p>
+        )}
+
+        <Button variant="primary" size="lg" type="submit" className="btn--block"
+          disabled={!complete || busy || burnt}>
+          {busy ? 'Verifying…' : 'Verify email'}
+        </Button>
+
+        <div style={{ textAlign: 'center' }}>
+          <p className="t-12 muted" style={{ margin: '0 0 var(--s-2)' }}>Didn&rsquo;t receive the code?</p>
+          <Button variant="secondary" type="button" onClick={resend} disabled={resending || cooldown > 0}>
+            {resending ? 'Sending…' : cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend code'}
+          </Button>
+        </div>
+
+        <p className="t-11 faint" style={{ margin: 0, lineHeight: 1.5, textAlign: 'center' }}>
+          Codes are valid for five minutes and are generated by PIE itself — no third-party
+          verification service is involved. Check your spam folder if nothing arrives.
         </p>
       </form>
     </Panel>

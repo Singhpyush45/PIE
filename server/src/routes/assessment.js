@@ -4,6 +4,8 @@
 // with the candidate's own evidence, so it is never a generic random assessment.
 
 import * as db from '../store.js';
+import * as identity from '../faceIdentity.js';
+import * as mailer from '../mailer.js';
 import {
   requireAuth, requireRole, rateLimit, str, bad,
   materializeCandidate, publicApp, advanceApplication,
@@ -79,10 +81,108 @@ export function registerAssessmentRoutes(app) {
   });
 
   /* ---------------------------------------------------------------- start */
+  /* --------------------------------------------------- identity gate (live) */
+  /**
+   * The live check that has to pass before an assessment can start.
+   *
+   * The browser sends a descriptor from the camera. This compares it with the
+   * registered template — which the browser has never seen and never will — and
+   * on a match returns a single-use ticket id. `/start` will not create an
+   * attempt without one.
+   *
+   * The rate limit is deliberate: without it, an attacker who could generate
+   * candidate descriptors could sit here trying them. Six a minute makes that
+   * pointless and still leaves an honest candidate room to fix their lighting.
+   */
+  app.post('/api/assessment/identity/verify', requireAuth, requireRole('candidate'),
+    rateLimit(6, 60_000), (req, res) => {
+      const user = db.findById('users', req.user.id);
+      if (!user) return res.status(401).json({ error: 'Sign in again.' });
+      if (mailer.isConfigured() && !user.emailVerified && !user.isDemo) {
+        return res.status(403).json({
+          error: 'Verify your email address before starting an assessment.', reason: 'EMAIL_UNVERIFIED' });
+      }
+
+      const requisitionId = str(req.body?.requisitionId, 60) || null;
+      const r = identity.verify({
+        candidateProfileId: req.user.candidateProfileId,
+        userId: user.id,
+        descriptor: req.body?.descriptor,
+        requisitionId,
+      });
+
+      db.audit({
+        actor: user.email, actorRole: 'candidate',
+        action: r.ok ? 'IDENTITY_CHECK_PASSED' : 'IDENTITY_CHECK_FAILED',
+        subjectType: 'candidateProfile', subjectId: req.user.candidateProfileId,
+        meta: { reason: r.reason || null, distance: r.distance ?? null, threshold: identity.MATCH_THRESHOLD },
+        note: r.ok
+          ? `Live capture matched the registered identity (distance ${r.distance} against a threshold of ${identity.MATCH_THRESHOLD}). `
+            + 'This is face verification, not liveness detection.'
+          : `Live identity check refused: ${r.reason}. No assessment session was created.`,
+      });
+
+      if (!r.ok) {
+        const code = r.reason === 'NOT_REGISTERED' ? 409 : 403;
+        return res.status(code).json({ error: r.detail, reason: r.reason, distance: r.distance ?? null });
+      }
+      res.json({
+        ok: true, checkId: r.checkId, distance: r.distance,
+        threshold: identity.MATCH_THRESHOLD,
+        expiresInMs: identity.CHECK_TTL_MS,
+        detail: r.detail,
+      });
+    });
+
   app.post('/api/assessment/start', requireAuth, requireRole('candidate'), rateLimit(20, 60_000), async (req, res) => {
     const profileId = req.user.candidateProfileId;
     const candidate = materializeCandidate(profileId);
     if (!candidate) return bad(res, 'Unknown candidate profile.');
+
+    // ── The identity gate. Enforced HERE, not in the interface. ──────────────
+    //
+    // Everything below is a separate question with a separate attacker behind
+    // it, and each is answered before an attempt exists. A request that reaches
+    // this endpoint directly — curl, a replayed fetch, a modified client — gets
+    // exactly the same treatment as one that came from the screen, because the
+    // screen is not what is being trusted.
+    //
+    // Demo personas are exempt. They are curated fixtures with no email and no
+    // face, reachable only through the explicit Demo entrance, and gating them
+    // would break the Grand Finale walkthrough while protecting nothing.
+    const gateUser = db.findById('users', req.user.id);
+    if (!gateUser) return res.status(401).json({ error: 'Sign in again.' });
+
+    if (!gateUser.isDemo) {
+      // Only enforced where it can be satisfied. On a deployment with no mail
+      // transport there is no way to send a code, so requiring one would lock
+      // every real candidate out of every assessment forever — a gate nobody
+      // can pass is not security, it is an outage. The integrity panel says
+      // plainly when it is unenforced, and configuring SMTP turns it on with
+      // no code change.
+      if (mailer.isConfigured() && !gateUser.emailVerified) {
+        return res.status(403).json({
+          error: 'Verify your email address before starting an assessment.',
+          reason: 'EMAIL_UNVERIFIED' });
+      }
+      if (!identity.identityFor(profileId)) {
+        return res.status(403).json({
+          error: 'Register your identity before starting an assessment.',
+          reason: 'IDENTITY_NOT_REGISTERED' });
+      }
+      const claim = identity.claimCheck({
+        checkId: str(req.body?.identityCheckId, 60),
+        candidateProfileId: profileId,
+        userId: gateUser.id,
+      });
+      if (!claim.ok) {
+        db.audit({ actor: gateUser.email, actorRole: 'candidate', action: 'ATTEMPT_BLOCKED',
+          subjectType: 'candidateProfile', subjectId: profileId,
+          meta: { reason: claim.reason },
+          note: `Assessment start refused by the identity gate: ${claim.reason}. No session was created.` });
+        return res.status(403).json({ error: claim.detail, reason: claim.reason });
+      }
+    }
 
     const applicationId = str(req.body?.applicationId, 60);
     const application = applicationId ? db.findById('applications', applicationId) : null;

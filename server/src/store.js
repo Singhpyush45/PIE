@@ -22,6 +22,16 @@ export const COLLECTIONS = [
   'humanDecisions', 'learningProgress', 'auditEvents', 'sessions', 'passwordResets',
   // Questions a recruiter wrote themselves, per requisition.
   'recruiterQuestions',
+  // Email ownership proof (hashed OTP + expiry + attempts). Short-lived and
+  // deliberately NOT mirrored: a five-minute code is cheaper to resend than to
+  // replicate, and an expired hash in a hosted database earns nothing.
+  'emailVerifications',
+  // One row per candidate: the registered face template. Mirrored, because an
+  // identity that does not survive a restart is not an identity.
+  'faceIdentities',
+  // Single-use tickets proving a live face check passed. Short-lived, bound to
+  // one candidate, not mirrored — a lost ticket costs one re-check.
+  'identityChecks',
 ];
 
 const empty = () => Object.fromEntries(COLLECTIONS.map(c => [c, []]));

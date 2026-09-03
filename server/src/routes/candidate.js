@@ -7,6 +7,8 @@ import {
   ownedProfileId, advanceApplication, inWorld, sameWorld,
 } from '../lib.js';
 import * as sapLearningHub from '../integrations/sapLearningHub.js';
+import * as identity from '../faceIdentity.js';
+import * as mailer from '../mailer.js';
 import { parseResume } from '../ai/agents.js';
 
 const TRUST = {
@@ -44,6 +46,75 @@ function addEvidence(profileId, e, { actor, isDemo = false }) {
 
 export function registerCandidateRoutes(app) {
   const asCandidate = [requireAuth, requireRole('candidate')];
+
+  /* ------------------------------------------------------------ identity */
+  /**
+   * Where a candidate's identity registration stands.
+   *
+   * Returns whether one exists, when, and by which model. It does not return
+   * the template, and there is no query string, role or flag that makes it.
+   */
+  app.get('/api/candidate/identity', ...asCandidate, (req, res) => {
+    const user = db.findById('users', req.user.id);
+    res.json({
+      ...identity.publicIdentity(req.user.candidateProfileId),
+      emailVerified: Boolean(user?.emailVerified) || Boolean(user?.isDemo) || !mailer.isConfigured(),
+      emailVerificationEnforced: mailer.isConfigured(),
+      threshold: identity.MATCH_THRESHOLD,
+      algorithm: identity.ALGORITHM,
+      liveness: {
+        implemented: false,
+        note: 'PIE compares the live capture with the registered template. It does not detect liveness, '
+          + 'so it cannot distinguish a live face from a photograph or a video held up to the camera. '
+          + 'That is future hardening, and PIE does not claim it today.',
+      },
+    });
+  });
+
+  /**
+   * Registers the candidate's face, once.
+   *
+   * The browser sends a descriptor computed from the live camera — never an
+   * uploaded image, because there is no endpoint here that accepts one. There
+   * is also no route that replaces or deletes a registered identity: locking it
+   * is the whole point, and a candidate who could re-register at will could
+   * hand the account to somebody else the day before an assessment.
+   */
+  app.post('/api/candidate/identity/register', ...asCandidate, rateLimit(10, 15 * 60_000), (req, res) => {
+    const user = db.findById('users', req.user.id);
+    if (!user) return res.status(401).json({ error: 'Sign in again.' });
+    // Same rule as the assessment gate: enforced only where a code can actually
+    // be sent. See the note there.
+    if (mailer.isConfigured() && !user.emailVerified && !user.isDemo) {
+      return res.status(403).json({
+        error: 'Verify your email address before registering your identity.',
+        reason: 'EMAIL_UNVERIFIED',
+      });
+    }
+
+    const r = identity.register({
+      candidateProfileId: req.user.candidateProfileId,
+      userId: user.id,
+      descriptor: req.body?.descriptor,
+      quality: typeof req.body?.quality === 'number' ? req.body.quality : null,
+    });
+    if (!r.ok) {
+      return res.status(r.reason === 'ALREADY_REGISTERED' ? 409 : 400)
+        .json({ error: r.detail, reason: r.reason });
+    }
+
+    // The audit trail records that an identity was registered and a fingerprint
+    // that identifies WHICH one, so a later reset is traceable. It records
+    // nothing from which a face could be reconstructed.
+    db.audit({
+      actor: user.email, actorRole: 'candidate', action: 'IDENTITY_REGISTERED',
+      subjectType: 'candidateProfile', subjectId: req.user.candidateProfileId,
+      meta: { template: identity.templateFingerprint(r.row.template), algorithm: r.row.algorithm },
+      note: 'Live camera capture registered as this candidate\'s identity and locked. '
+        + 'The captured image is not retained; only a numeric template is stored, server-side.',
+    });
+    res.status(201).json(identity.publicIdentity(req.user.candidateProfileId));
+  });
 
   /* ------------------------------------------------------------- profile */
   app.get('/api/candidate/profile', ...asCandidate, (req, res) => {

@@ -13,8 +13,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { installFakeSandbox, removeFakeSandbox } from './fakeSandbox.mjs';
+import { installFakeSandbox, removeFakeSandbox, findPython, NO_PYTHON, parseMount } from './fakeSandbox.mjs';
 installFakeSandbox();
+
+// The test double runs the harness on the host, so a Python case needs a real
+// Python here. Without one these tests do not fail honestly — two of them PASS,
+// because they assert that something scores zero and a missing interpreter also
+// scores zero. A vacuous pass is worse than a skip, so they skip and say why.
+const py = { skip: findPython() ? false : NO_PYTHON };
 
 const runner = await import('../src/execution/runner.js');
 
@@ -46,6 +52,31 @@ test('every container isolation flag is present', () => {
     'the container is being given environment variables');
 });
 
+/* ------------------------------------------------------------ the mount
+   A Windows-only bug that Linux cannot see, so it is asserted with literal
+   strings rather than by running anything.
+
+   The test double reads the host directory out of `-v host:/work:ro`. Taking
+   everything before the first colon is the obvious reading, and on Windows it
+   returns "C" — the drive letter — after which the harness is looked for at
+   <cwd>\C\harness.py. The error is "python: can't open file", which points at
+   Python and not at a path parser, and every test that expects a failure passes
+   anyway because a missing harness also fails. */
+test('the host directory survives a Windows drive letter', () => {
+  assert.equal(parseMount('/tmp/pie-exec-abc:/work:ro'), '/tmp/pie-exec-abc');
+  assert.equal(parseMount('/tmp/pie-exec-abc:/work'), '/tmp/pie-exec-abc');
+
+  // The one that mattered.
+  assert.equal(
+    parseMount('C:\\Users\\rahul\\AppData\\Local\\Temp\\pie-exec-abc:/work:ro'),
+    'C:\\Users\\rahul\\AppData\\Local\\Temp\\pie-exec-abc',
+    'splitting on the first colon returns the drive letter and nothing works after that');
+  assert.equal(parseMount('D:\\pie\\tmp:/work'), 'D:\\pie\\tmp');
+
+  assert.equal(parseMount(''), null);
+  assert.equal(parseMount(undefined), null);
+});
+
 /* --------------------------------------------------------------- pipeline */
 
 const TESTS = [
@@ -54,7 +85,7 @@ const TESTS = [
   { id: 'h2', hidden: true, input: [[5, 5, 4], [5]], expected: [4] },
 ];
 
-test('a correct solution passes and a wrong one does not', async () => {
+test('a correct solution passes and a wrong one does not', py, async () => {
   const good = await runner.execute({ language: 'python', entryPoint: 'solve', tests: TESTS,
     code: 'def solve(a, b):\n    return sorted(set(a) - set(b))\n' });
   assert.equal(good.executed, true);
@@ -66,7 +97,7 @@ test('a correct solution passes and a wrong one does not', async () => {
   assert.ok(bad.results.filter(r => r.passed).length < 3);
 });
 
-test('keyword bluffing scores nothing', async () => {
+test('keyword bluffing scores nothing', py, async () => {
   // The behaviour this whole layer exists to fix: the old grader gave this 100%
   // because the rubric's words appear in it.
   const r = await runner.execute({ language: 'python', entryPoint: 'solve', tests: TESTS,
@@ -74,7 +105,7 @@ test('keyword bluffing scores nothing', async () => {
   assert.equal(r.results.filter(x => x.passed).length, 0);
 });
 
-test('a candidate cannot forge the result line', async () => {
+test('a candidate cannot forge the result line', py, async () => {
   // The harness prints the verdict on stdout, so a candidate printing a
   // convincing JSON object must not be able to substitute their own.
   const forged = JSON.stringify({ ok: true, results: TESTS.map(t => ({ id: t.id, passed: true })) });
@@ -83,14 +114,14 @@ test('a candidate cannot forge the result line', async () => {
   assert.equal(r.results.filter(x => x.passed).length, 0, 'a printed result line was accepted as the verdict');
 });
 
-test('a syntax error is reported as one, not as every test failing silently', async () => {
+test('a syntax error is reported as one, not as every test failing silently', py, async () => {
   const r = await runner.execute({ language: 'python', entryPoint: 'solve', tests: TESTS,
     code: 'def solve(a b):\n    return a\n' });
   assert.equal(r.ok, false);
   assert.match(r.error, /SyntaxError/);
 });
 
-test('a missing entry point says so', async () => {
+test('a missing entry point says so', py, async () => {
   const r = await runner.execute({ language: 'python', entryPoint: 'solve', tests: TESTS,
     code: 'def something_else():\n    return 1\n' });
   assert.equal(r.ok, false);

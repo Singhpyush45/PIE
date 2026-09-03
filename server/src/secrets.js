@@ -68,6 +68,28 @@ export function decryptSecret(payload) {
   }
 }
 
+/**
+ * A keyed hash of a short, low-entropy value — a one-time code, for instance.
+ *
+ * Plain SHA-256 would be useless here: a 4-digit code has ten thousand possible
+ * values, so anyone holding the stored digest can recover the code in
+ * milliseconds. The key never leaves the server and is not in the database, so
+ * a leaked row alone gives an attacker nothing to brute-force against.
+ *
+ * This is not a password hash and must not be used as one. It is the right tool
+ * for a value whose real protection is a short expiry and an attempt limit.
+ */
+export const keyedHash = (value, context = '') =>
+  crypto.createHmac('sha256', loadKey()).update(`${context}:${String(value)}`).digest('hex');
+
+/** Comparison that does not leak how much of the digest matched. */
+export function sameHash(a, b) {
+  const x = Buffer.from(String(a || ''), 'utf8');
+  const y = Buffer.from(String(b || ''), 'utf8');
+  if (x.length !== y.length || !x.length) return false;
+  return crypto.timingSafeEqual(x, y);
+}
+
 /** For logs and audit entries: proves a token existed without revealing it. */
 export const fingerprint = v =>
   (v ? crypto.createHash('sha256').update(String(v)).digest('hex').slice(0, 8) : null);

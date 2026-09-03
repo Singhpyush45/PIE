@@ -15,7 +15,8 @@ import http from 'node:http';
 const TABLES = new Set(['profiles', 'organizations', 'recruiter_profiles', 'candidate_profiles',
   'requisitions', 'applications', 'evidence', 'github_connections', 'github_repositories',
   'projects', 'certificates', 'hackathons', 'agent_runs', 'match_results', 'assessment_attempts',
-  'proctoring_events', 'bias_audits', 'human_decisions', 'learning_progress', 'audit_events']);
+  'proctoring_events', 'bias_audits', 'human_decisions', 'learning_progress', 'audit_events',
+  'face_identities']);
 
 const notFound = (res) => {
   res.writeHead(404, { 'content-type': 'application/json' });
@@ -56,7 +57,7 @@ test('1 — the project URL is accepted however it was pasted', async () => {
     for (const url of [m.base, `${m.base}/`, `${m.base}/rest/v1`, `${m.base}/rest/v1/`, `  ${m.base}  `]) {
       const r = await verifyWith(url);
       assert.equal(r.state, 'CONNECTED', `"${url.trim()}" should verify, got ${r.state}`);
-      assert.equal(r.tables.length, 20);
+      assert.equal(r.tables.length, TABLES.size);
     }
     // The decisive assertion: /rest/v1 is never doubled, whatever was pasted.
     assert.ok(m.paths.every(p => !p.includes('/rest/v1/rest/v1')),
@@ -87,6 +88,7 @@ test('3 — a schema that genuinely was never applied still reports as missing',
 
 test('4 — a partially applied schema names the tables that are absent', async () => {
   const half = [...TABLES].slice(0, 10);
+  const rest = TABLES.size - 10;
   const m = await mock((req, res) => {
     const x = new URL(req.url, 'http://x').pathname.match(/^\/rest\/v1\/([a-z_]+)$/);
     if (x && half.includes(x[1])) { res.writeHead(200, { 'content-type': 'application/json' }); return res.end('[]'); }
@@ -96,7 +98,7 @@ test('4 — a partially applied schema names the tables that are absent', async 
     const r = await verifyWith(m.base);
     assert.equal(r.state, 'REACHABLE_SCHEMA_PARTIAL');
     assert.equal(r.tables.length, 10);
-    assert.equal(r.missing.length, 10);
+    assert.equal(r.missing.length, rest);
   } finally { m.close(); }
 });
 
@@ -218,7 +220,13 @@ async function freshMirror(envs = {}) {
   return import(`../src/persistence/mirror.js?c=${Math.random()}`);
 }
 
-test('13 — a secret is never shaped into a mirrored row', async () => {
+// The line between "verifier" and "credential", which is the whole of the
+// mirror's secrets policy. A bcrypt hash is a verifier: it cannot be replayed
+// against PIE, and an account restored without it is an account nobody can ever
+// sign in to again — which was the production bug. A session token, a reset
+// token and an encrypted GitHub token are credentials: holding one IS being
+// logged in. So the first is mirrored and the rest never are.
+test('13 — the mirror carries verifiers and never carries credentials', async () => {
   process.env.SUPABASE_URL = 'http://127.0.0.1:1';
   process.env.SUPABASE_SERVICE_ROLE_KEY = 'placeholder';
   const m = await freshMirror();
@@ -226,13 +234,24 @@ test('13 — a secret is never shaped into a mirrored row', async () => {
   const row = m.shapeRow('users', {
     id: 'usr_1', role: 'candidate', name: 'Someone', username: 'someone',
     email: 'someone@example.test', isDemo: false,
-    passwordHash: '$2a$10$MUST-NEVER-LEAVE',
+    passwordHash: '$2a$10$THE-VERIFIER',
+    password: 'hunter2-MUST-NEVER-LEAVE',
+    candidateProfileId: 'cand_1',
   });
   const wire = JSON.stringify(row);
-  assert.ok(!wire.includes('MUST-NEVER-LEAVE'), 'a password hash must never reach the mirror payload');
-  assert.ok(!/password/i.test(wire), 'no password field of any kind');
+  assert.equal(row.password_hash, '$2a$10$THE-VERIFIER',
+    'the bcrypt hash must be mirrored — without it a restored account cannot sign in');
+  assert.ok(!wire.includes('hunter2'), 'a plaintext password must never reach the mirror payload');
+  assert.equal(row.candidate_profile_legacy_id, 'cand_1',
+    "the user's link to its candidate profile survives, as a PIE id and not a uuid");
   assert.equal(row.legacy_id, 'usr_1', "PIE's own id is carried as legacy_id");
   assert.equal(row.full_name, 'Someone', 'name maps onto the schema column');
+
+  const sess = m.shapeRow('users', { id: 'usr_2', name: 'X', username: 'x', email: 'x@y.z',
+    tokenHash: 'SESSION-MUST-NEVER-LEAVE', accessToken: 'GH-MUST-NEVER-LEAVE' });
+  const sessWire = JSON.stringify(sess);
+  assert.ok(!sessWire.includes('MUST-NEVER-LEAVE'),
+    'session and access tokens are credentials and are never mirrored');
 
   const gh = m.shapeRow('githubConnections', {
     id: 'ghc_1', candidateProfileId: 'cand_1', login: 'someone',
@@ -268,16 +287,36 @@ test('15 — unknown fields are dropped rather than invented as columns', async 
   assert.equal(row.legacy_candidate_id, 'cand_1', 'the parent id travels as a legacy id');
 });
 
-test('16 — the mirror is off unless explicitly switched on', async () => {
+// Configuring a database and then not writing to it is not a state anyone
+// intends. It used to be the default, and it is the shape of the production bug:
+// Supabase present, mirror quiet, restore finds nothing, sign-in fails, no error
+// anywhere. So the default is now ON, and turning it off has to be a choice.
+test('16 — mirroring follows the configuration, and switching it off is explicit', async () => {
   process.env.SUPABASE_URL = 'http://127.0.0.1:3999';
   process.env.SUPABASE_SERVICE_ROLE_KEY = 'placeholder';
-  process.env.SUPABASE_MIRROR = '';
+
+  delete process.env.SUPABASE_MIRROR;
+  const on = await import(`../src/persistence/mirror.js?c=${Math.random()}`);
+  assert.equal(on.isEnabled(), true, 'a configured Supabase is mirrored to without being asked twice');
+  assert.equal(on.status().systemOfRecord, 'Supabase across restarts; the JSON store within a run');
+
+  process.env.SUPABASE_MIRROR = '0';
   const off = await import(`../src/persistence/mirror.js?c=${Math.random()}`);
-  assert.equal(off.isEnabled(), false, 'no SUPABASE_MIRROR means no mirroring');
+  assert.equal(off.isEnabled(), false, 'SUPABASE_MIRROR=0 turns it off');
   assert.equal(off.attach(), false, 'and attach() must decline to subscribe');
   assert.match(off.status().state, /OFF|NOT_CONFIGURED/);
   assert.equal(off.status().systemOfRecord, 'Local JSON store');
-  process.env.SUPABASE_MIRROR = '1';
+  assert.match(off.status().detail, /lost on the next restart/,
+    'and it must say what turning it off costs, not just that it is off');
+
+  delete process.env.SUPABASE_MIRROR;
+
+  // With no Supabase at all there is nothing to mirror to, whatever the flag.
+  const url = process.env.SUPABASE_URL;
+  delete process.env.SUPABASE_URL;
+  const none = await import(`../src/persistence/mirror.js?c=${Math.random()}`);
+  assert.equal(none.isEnabled(), false);
+  process.env.SUPABASE_URL = url;
 });
 
 test('17 — an unreachable Supabase degrades, and never throws into a write', async () => {
@@ -292,7 +331,8 @@ test('17 — an unreachable Supabase degrades, and never throws into a write', a
   const before = store.count('organizations');
   await assert.doesNotReject(() => m.flush(), 'flush must never throw');
   assert.equal(store.count('organizations'), before, 'the local store is untouched by a mirror failure');
-  assert.equal(m.status().systemOfRecord, 'Local JSON store');
+  assert.match(m.status().state, /DEGRADED|IDLE|MIRRORING/,
+    'a dead endpoint degrades the mirror; it does not take the request path with it');
 });
 
 /* ════════════════════════════════ THE FIVE BUGS THAT ONLY APPEARED IN PRODUCTION

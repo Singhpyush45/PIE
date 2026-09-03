@@ -48,6 +48,24 @@ const env = {
   GITHUB_TOKEN: '',
   GITHUB_CLIENT_ID: '',
   GITHUB_CLIENT_SECRET: '',
+  // And mail. This one is not a nicety.
+  //
+  // With a transport configured, candidate registration stops issuing a session
+  // and hands back a verification challenge instead — which is correct, and
+  // which makes `cand.data.user` null for the dozen tests in auth.test.mjs that
+  // register a candidate and then use them. Whether those tests pass would
+  // otherwise depend on what happens to be in the developer's own server/.env,
+  // so the machine with real SMTP credentials sees sixteen failures and the
+  // machine without sees none.
+  //
+  // The OTP and identity suites do not rely on this: otp.test.mjs, otphttp and
+  // gate each start their own PIE with mail wired to a fake SMTP server, so the
+  // configured path is still covered — just not from here.
+  SMTP_HOST: '', SMTP_PORT: '', SMTP_USER: '', SMTP_PASS: '', SMTP_FROM: '', SMTP_SECURE: '',
+  MAIL_HTTP_PROVIDER: '', RESEND_API_KEY: '', BREVO_API_KEY: '', MAIL_FROM: '',
+  // Supabase likewise: hydrate.test.mjs points at its own fake PostgREST, and a
+  // real project in .env would otherwise be read — and written to — by a test run.
+  SUPABASE_URL: '', SUPABASE_SERVICE_ROLE_KEY: '',
 };
 
 const log = (m) => process.stdout.write(`${m}\n`);
@@ -107,12 +125,19 @@ async function main() {
     'test/auth.test.mjs',
     'test/flows.test.mjs',
     'test/supabase.test.mjs',
+    'test/hydrate.test.mjs',
+    'test/otp.test.mjs',
+    'test/otphttp.test.mjs',
+    'test/identity.test.mjs',
+    'test/gate.test.mjs',
     'test/assessment.test.mjs',
     'test/execution.test.mjs',
     'test/checks.test.mjs',
     'test/facewatch.test.mjs',
     'test/facedetect.test.mjs',
     'test/brief.test.mjs',
+    'test/hana.test.mjs',
+    'test/sapai.test.mjs',
   ];
 
   let code = 0;

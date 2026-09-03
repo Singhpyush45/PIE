@@ -1,10 +1,12 @@
 // PIE — write-behind mirror into Supabase.
 //
 // WHAT THIS IS
-//   The JSON store stays the system of record. Every write to it is ALSO queued
-//   and pushed to Supabase in the background. Nothing reads from Supabase yet.
-//   That ordering is deliberate: it lets you run both for a while and compare,
-//   which is how you find a bad column mapping before it costs you data.
+//   The JSON store stays the system of record WHILE THE PROCESS RUNS. Every
+//   write to it is also queued and pushed to Supabase in the background.
+//
+//   Reading back is a separate module — persistence/hydrate.js — which runs once
+//   at boot. That split is deliberate: the request path never waits on the
+//   network, and the restore path never competes with live writes.
 //
 // WHAT IT WILL NOT DO
 //   • It never throws into a request. A database that is asleep, rate-limited or
@@ -23,14 +25,41 @@ import * as db from '../store.js';
 import * as sb from './supabase.js';
 
 /* ------------------------------------------------------------------ config */
-export const isEnabled = () => process.env.SUPABASE_MIRROR === '1' && sb.isConfigured();
+/**
+ * ON whenever Supabase is configured. Set SUPABASE_MIRROR=0 to turn it off.
+ *
+ * This used to be opt-in, which was right while nothing read the data back: an
+ * unproven column mapping should not run unasked. It is wrong now. hydrate.js
+ * restores accounts from exactly these rows, so a mirror that is off means a
+ * database that stays empty, a restore that finds nothing, and a candidate who
+ * cannot sign in — with no error anywhere to explain it. Configuring Supabase
+ * and then silently not using it is not a state worth defaulting to.
+ */
+export const isEnabled = () => process.env.SUPABASE_MIRROR !== '0' && sb.isConfigured();
 
 const FLUSH_MS = Number(process.env.SUPABASE_MIRROR_FLUSH_MS || 1500);
 const MAX_BATCH = Number(process.env.SUPABASE_MIRROR_BATCH || 200);
 
 // Never leaves the server, whatever the column mapping says.
+//
+// `passwordHash` is deliberately NOT on this list, and that distinction matters.
+// A bcrypt hash is not a credential — it is the verifier a users table exists to
+// hold, it cannot be replayed against PIE, and every password system on earth
+// stores one. A session token is the opposite: it IS the credential, and anyone
+// holding it is logged in. So the hash is mirrored (behind RLS, reachable only
+// with the service-role key) and the token never is.
+//
+// Without the hash, hydrating an account back after a restart would restore a
+// user who can never sign in again — which is the exact production bug this
+// whole path exists to fix.
+// A face template is NOT on this list either, and for the same reason: if it
+// never reaches the database it does not survive a restart, and every candidate
+// has to re-register their identity every time Render recycles the instance.
+// Biometric data is protected by where it lives and who can read it — its own
+// table, RLS on with no policies so only the service-role key reaches it, absent
+// from every public serialiser, never logged — not by refusing to persist it.
 const SECRET_KEYS = new Set([
-  'passwordHash', 'password', 'tokenHash', 'token',
+  'password', 'tokenHash', 'token',
   'accessToken', 'accessTokenEncrypted', 'refreshToken',
 ]);
 
@@ -42,7 +71,7 @@ const NEVER = new Set(['sessions', 'passwordResets']);
  * exists. This is the order a full sync walks.
  */
 const ORDER = [
-  'organizations', 'users', 'recruiters', 'candidateProfiles', 'requisitions',
+  'organizations', 'users', 'recruiters', 'candidateProfiles', 'faceIdentities', 'requisitions',
   'applications', 'evidence', 'githubConnections', 'githubRepositories',
   'projects', 'certificates', 'hackathons', 'agentRuns', 'matchResults',
   'assessmentAttempts', 'proctoringEvents', 'biasAudits', 'humanDecisions',
@@ -51,6 +80,7 @@ const ORDER = [
 
 /** Which PIE field points at which parent collection, and the columns to fill. */
 const LINKS = {
+  faceIdentities:      [{ field: 'candidateProfileId', parent: 'candidateProfiles', legacy: 'legacy_candidate_id', uuid: 'candidate_profile_id' }],
   evidence:            [{ field: 'candidateProfileId', parent: 'candidateProfiles', legacy: 'legacy_candidate_id', uuid: 'candidate_profile_id' }],
   githubConnections:   [{ field: 'candidateProfileId', parent: 'candidateProfiles', legacy: 'legacy_candidate_id', uuid: 'candidate_profile_id' }],
   githubRepositories:  [{ field: 'candidateProfileId', parent: 'candidateProfiles', legacy: 'legacy_candidate_id', uuid: 'candidate_profile_id' }],
@@ -110,7 +140,15 @@ const NOT_NULL_TIMESTAMPS = new Set(['created_at', 'started_at', 'decided_at', '
  * and "null value in column event_type" does not tell you PIE calls it `type`.
  */
 const FIELD_ALIASES = {
-  users:            { name: 'full_name' },
+  // A user row carries the ids of the profiles it owns. Those are PIE ids, not
+  // uuids, so they are stored under explicit `_legacy_id` names — a column called
+  // `candidate_profile_id` would read as a uuid foreign key and be wrong.
+  users: {
+    name: 'full_name',
+    candidateProfileId: 'candidate_profile_legacy_id',
+    recruiterId: 'recruiter_legacy_id',
+    organizationId: 'organization_legacy_id',
+  },
   evidence:         { text: 'body', date: 'evidence_date' },
   requisitions:     { text: 'body' },
   hackathons:       { organizer: 'organiser' },
@@ -141,13 +179,23 @@ const REQUIRED = {
   human_decisions: ['reviewer', 'action', 'reason'],
   learning_progress: ['skill_id'],
   audit_events: ['actor', 'action'],
+  face_identities: ['algorithm', 'template'],
 };
 
 export const requiredColumns = () => REQUIRED;
 
+/* The shape metadata, exported so persistence/hydrate.js can run it backwards.
+   One declaration, two directions — a mapping that drifts between push and pull
+   would restore rows that look right and link to nothing. */
+export const shapeMeta = () => ({ ORDER, LINKS, FIELD_ALIASES, COLUMNS, NEVER });
+
 /** Columns each table actually has, so the mirror never invents one. */
 const COLUMNS = {
-  profiles: ['legacy_id', 'role', 'full_name', 'username', 'email', 'title', 'is_demo', 'created_at'],
+  profiles: ['legacy_id', 'role', 'full_name', 'username', 'email', 'title', 'is_demo', 'created_at',
+    // Migration 003. Without these an account restored after a restart could
+    // neither sign in nor prove it had verified its email.
+    'password_hash', 'email_verified', 'email_verified_at', 'candidate_profile_legacy_id',
+    'recruiter_legacy_id', 'organization_legacy_id'],
   organizations: ['legacy_id', 'name', 'industry', 'size', 'hq', 'is_demo', 'created_at'],
   recruiter_profiles: ['legacy_id', 'legacy_organization_id', 'organization_id', 'name', 'title', 'is_demo', 'created_at'],
   candidate_profiles: ['legacy_id', 'persona_id', 'name', 'headline', 'context', 'protected_context',
@@ -184,6 +232,12 @@ const COLUMNS = {
   learning_progress: ['legacy_id', 'legacy_candidate_id', 'candidate_profile_id', 'skill_id', 'resource_id',
     'state', 'completion_verification', 'is_demo', 'created_at'],
   audit_events: ['legacy_id', 'actor', 'actor_role', 'action', 'subject_type', 'subject_id', 'note', 'meta', 'is_demo'],
+  // Migration 003. The template is the whole point of the row, so it is listed
+  // like any other column; what protects it is the table's RLS and the fact
+  // that no serialiser anywhere returns it.
+  face_identities: ['legacy_id', 'legacy_candidate_id', 'candidate_profile_id', 'legacy_user_id',
+    'algorithm', 'template_version', 'dimensions', 'template', 'quality', 'locked',
+    'registered_at', 'is_demo', 'created_at'],
 };
 
 /* ------------------------------------------------------------------- state */
@@ -361,7 +415,13 @@ export async function flush() {
     // Walk in dependency order so a parent exists before its children.
     const ordered = work.sort((a, b) => ORDER.indexOf(a[0]) - ORDER.indexOf(b[0]));
     for (const [collection, ids] of ordered) {
-      const rows = [...ids].map(id => db.findById(collection, id)).filter(Boolean);
+      // The demo world is regenerated from seed.js on every empty boot, so
+      // pushing it would accumulate a fresh set of orphans in Supabase every
+      // time the process restarts. Only real data is mirrored automatically;
+      // the admin sync endpoint can still send demo rows on request.
+      const includeDemo = process.env.SUPABASE_MIRROR_DEMO === '1';
+      const rows = [...ids].map(id => db.findById(collection, id))
+        .filter(r => r && (includeDemo || !r.isDemo));
       if (!rows.length) continue;
       try {
         pushed += await pushCollection(collection, rows);
@@ -452,9 +512,9 @@ export function status() {
     detail: !sb.isConfigured()
       ? 'Supabase is not configured, so nothing is mirrored. The JSON store is the system of record.'
       : !on
-        ? 'Mirroring is off. Set SUPABASE_MIRROR=1 to push new writes to Supabase. The JSON store stays the system of record either way.'
-        : `Writes are pushed to Supabase in the background. The JSON store remains the system of record — nothing reads from Supabase yet.`,
-    systemOfRecord: 'Local JSON store',
+        ? 'Mirroring is off (SUPABASE_MIRROR=0). New writes stay in the local JSON store only, which on a host with an ephemeral filesystem means they are lost on the next restart.'
+        : 'Writes are pushed to Supabase in the background, and read back at boot by the restore step. Supabase is what makes an account outlive a restart.',
+    systemOfRecord: on ? 'Supabase across restarts; the JSON store within a run' : 'Local JSON store',
     ...stats, enabled: on,
   };
 }

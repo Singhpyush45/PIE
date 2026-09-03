@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Icon, Button, Card, CardHead, Badge, Pill, Stat, Alert, Meter, Empty, Skeleton, cx } from './kit.jsx';
 import { TimerRing, BarList, f2, pc } from './charts.jsx';
 import { api } from './api.js';
+import { IdentityCheck } from './identityUI.jsx';
 import { NoRolesYet } from './screens/candidate.jsx';
 import { watchFaces } from './faceWatch.js';
 
@@ -928,6 +929,9 @@ export default function AssessmentFlow({ ctx, onFinished, onExit }) {
   const [demoMode, setDemoMode] = useState(false);
   const [error, setError] = useState(null);
   const [target, setTarget] = useState(null);      // { requisitionId, applicationId, title }
+  // Held between the device check and the identity check, because the identity
+  // check sits between choosing to start and actually starting.
+  const [pending, setPending] = useState(null);
   const mediaRef = useRef(null);
   const screenRef = useRef(null);
 
@@ -958,18 +962,38 @@ export default function AssessmentFlow({ ctx, onFinished, onExit }) {
     setBusy(false);
   }
 
-  const steps = ['Choose role', 'Consent', 'Device check', 'Assessment', 'Result'];
-  const stepIdx = { pick: 0, consent: 1, preflight: 2, live: 3, result: 4 }[stage];
+  // A curated demo persona has no email and no registered face; the server
+  // exempts them, so asking them for an identity check would be theatre.
+  const needsIdentity = !ctx.user?.isDemo;
 
-  async function begin(pf) {
-    setBusy(true); setError(null); setDemoMode(Boolean(pf.demoMode));
+  const steps = needsIdentity
+    ? ['Choose role', 'Consent', 'Device check', 'Identity', 'Assessment', 'Result']
+    : ['Choose role', 'Consent', 'Device check', 'Assessment', 'Result'];
+  const stepIdx = needsIdentity
+    ? { pick: 0, consent: 1, preflight: 2, identity: 3, live: 4, result: 5 }[stage]
+    : { pick: 0, consent: 1, preflight: 2, live: 3, result: 4 }[stage];
+
+  /**
+   * The device check is done. For a real candidate the next thing is the
+   * identity check, not the assessment — the attempt is created only once the
+   * server has issued a verification, and the server refuses to create one
+   * without it either way.
+   */
+  function begin(pf) {
+    setDemoMode(Boolean(pf.demoMode));
+    if (needsIdentity) { setPending(pf); setError(null); setStage('identity'); return; }
+    launch(pf, null);
+  }
+
+  async function launch(pf, identityCheckId) {
+    setBusy(true); setError(null);
     try {
       const r = await api.startAssessment({
-        consent, preflight: pf, language,
+        consent, preflight: pf, language, identityCheckId,
         requisitionId: target?.requisitionId, applicationId: target?.applicationId,
       });
       setAttempt(r.attempt); setQuestion(r.question); setStage('live');
-    } catch (e) { setError(e.message); }
+    } catch (e) { setError(e.message); setStage(needsIdentity ? 'identity' : 'preflight'); }
     setBusy(false);
   }
 
@@ -1086,6 +1110,16 @@ export default function AssessmentFlow({ ctx, onFinished, onExit }) {
         <Consent policy={policy} blueprint={blueprint} onCancel={() => setStage('pick')}
           languages={languages} language={language} onLanguage={setLanguage}
           onAccept={c => { setConsent(c); setStage('preflight'); }} />
+      )}
+      {stage === 'identity' && (
+        <Card>
+          <CardHead icon="shield" eyebrow="Step 4" title="Verify your identity"
+            sub="Only the candidate this account belongs to may sit this assessment." />
+          <IdentityCheck
+            requisitionId={target?.requisitionId}
+            onVerified={id => launch(pending, id)}
+            onBack={() => setStage('preflight')} />
+        </Card>
       )}
       {stage === 'preflight' && (
         <Preflight mediaRef={mediaRef} screenRef={screenRef} onBack={() => setStage('consent')} onReady={begin} />

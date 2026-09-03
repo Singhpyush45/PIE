@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { IdentityRegister } from '../identityUI.jsx';
 import {
   Icon, Button, Card, CardHead, Badge, Pill, Stat, Alert, Meter, Tabs, Empty,
   Skeleton, Insight, Modal, cx,
@@ -303,7 +304,9 @@ function Profile({ ctx }) {
 
   if (!p) return <Skeleton lines={4} />;
   return (
-    <form onSubmit={save} className="stack" style={{ maxWidth: 780 }}>
+    <div className="stack" style={{ maxWidth: 780 }}>
+      <IdentityCard ctx={ctx} />
+      <form onSubmit={save} className="stack">
       <Card flush>
         <CardHead icon="user" title="Your profile" sub="Context only. None of this is scored." />
         <div className="card__body stack">
@@ -337,7 +340,79 @@ function Profile({ ctx }) {
           </div>
         </div>
       </Card>
-    </form>
+      </form>
+    </div>
+  );
+}
+
+/* ================================================================= IDENTITY */
+/**
+ * Registering the face that will be checked before every assessment.
+ *
+ * It lives on the profile page rather than interrupting the dashboard: a
+ * candidate should be able to build their evidence, look around and decide,
+ * rather than being met by a camera the moment they sign in. The assessment
+ * flow asks for it at the point it is actually needed, and the server refuses
+ * to start one without it, so nothing is lost by being unhurried here.
+ *
+ * There is no "change photo" control, because a candidate who could replace
+ * their own registered face could hand the account to someone else.
+ */
+function IdentityCard({ ctx }) {
+  const [identity, setIdentity] = useState(null);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => { api.identity().then(setIdentity).catch(() => setIdentity(null)); }, []);
+  if (!identity || ctx.user?.isDemo) return null;
+
+  if (identity.registered) {
+    return (
+      <Card flush>
+        <CardHead icon="shield" title="Your identity"
+          sub="Checked before every assessment"
+          right={<Badge tone="ok" icon="check">Verified &amp; locked</Badge>} />
+        <div className="card__body stack">
+          <p className="t-13 muted" style={{ margin: 0, lineHeight: 1.6 }}>
+            Registered {new Date(identity.registeredAt).toLocaleDateString()}. PIE stores a numeric
+            template, never a photograph, and it is held on the server rather than in this browser.
+            Your identity is locked — only Trust &amp; Integrity can reset it, and a reset is recorded
+            in the audit trail.
+          </p>
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card flush>
+      <CardHead icon="shield" title="Register your identity"
+        sub="Required before your first assessment"
+        right={<Badge tone="warn" icon="alert">Not registered</Badge>} />
+      <div className="card__body stack">
+        {!identity.emailVerified && (
+          <Alert tone="warn" title="Verify your email first">
+            Your email address has not been confirmed yet, so identity registration is not open.
+          </Alert>
+        )}
+        {identity.emailVerified && !open && (
+          <>
+            <p className="t-13 muted" style={{ margin: 0, lineHeight: 1.6 }}>
+              PIE checks that the person sitting an assessment is the person whose account it is.
+              That check needs something to compare against, captured once, from your live camera.
+            </p>
+            <div><Button variant="primary" icon="camera" onClick={() => setOpen(true)}>
+              Register my identity
+            </Button></div>
+          </>
+        )}
+        {identity.emailVerified && open && (
+          <IdentityRegister
+            onDone={r => { setIdentity({ ...identity, ...r }); setOpen(false); ctx.notify('ok', 'Identity registered and locked.'); }}
+            onSkip={() => setOpen(false)}
+          />
+        )}
+      </div>
+    </Card>
   );
 }
 

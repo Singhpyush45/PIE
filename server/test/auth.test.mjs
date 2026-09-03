@@ -46,6 +46,19 @@ before(async () => {
   rec = await register('recruiter', { organization: `Testworks ${uniq()}` });
   assert.equal(cand.status, 201, 'candidate registration must succeed');
   assert.equal(rec.status, 201, 'recruiter registration must succeed');
+
+  // Every test below uses `cand.data.user`, which is null when the server has a
+  // mail transport — because then registration correctly withholds the session
+  // until the address is proven. Without this line that shows up as a dozen
+  // "Cannot read properties of null" TypeErrors pointing at the wrong thing.
+  //
+  // test/run.mjs clears the mail variables so the shared server never has one.
+  // Seeing this message means either that was undone, or you are running
+  // `test:live` against a server that does. The configured path is covered by
+  // otphttp.test.mjs and gate.test.mjs, which start their own PIE with a fake
+  // SMTP server and read the codes off the wire.
+  assert.ok(cand.data.user, 'This server has a mail transport configured, so a candidate is not '
+    + 'signed in at registration and this file cannot run against it. See test/run.mjs.');
 });
 
 /* ══════════════════════════════════════════════════════════ REGISTRATION */

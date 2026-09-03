@@ -45,6 +45,15 @@ export const api = {
   checkResetToken: token => req(`/auth/reset/check?token=${encodeURIComponent(token)}`),
   resetPassword: body => req('/auth/reset', { method: 'POST', body }),
   register: body => req('/auth/register', { method: 'POST', body }),
+
+  /* Email ownership. The code itself only ever exists in the candidate's inbox
+     and in the request that submits it — never in a response, never in state
+     that outlives the screen. */
+  requestEmailCode: email => req('/auth/verify-email/request', { method: 'POST', body: { email } }),
+  confirmEmailCode: ({ email, code, ticket }) =>
+    req('/auth/verify-email/confirm', { method: 'POST', body: { email, code, ticket } }),
+  emailVerificationState: email =>
+    req(`/auth/verify-email/state?email=${encodeURIComponent(email)}`),
   logout: () => req('/auth/logout', { method: 'POST' }),
   me: () => req('/auth/me'),
   available: q => req(`/auth/available?${new URLSearchParams(q)}`),
@@ -107,6 +116,13 @@ export const api = {
   assessmentLanguages: () => req('/assessment/languages'),
   blueprint: body => req('/assessment/blueprint', { method: 'POST', body }),
   startAssessment: body => req('/assessment/start', { method: 'POST', body }),
+
+  /* Identity. The descriptor travels in a POST body and nowhere else — never a
+     query string, never storage. The server keeps the template and makes the
+     decision; nothing here ever receives it back. */
+  identity: () => req('/candidate/identity'),
+  registerIdentity: body => req('/candidate/identity/register', { method: 'POST', body }),
+  verifyIdentity: body => req('/assessment/identity/verify', { method: 'POST', body }),
   attempt: id => req(`/assessment/${id}`),
   answer: (id, body) => req(`/assessment/${id}/answer`, { method: 'POST', body }),
   proctor: (id, type, simulated = false) =>

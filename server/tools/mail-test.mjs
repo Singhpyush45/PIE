@@ -1,4 +1,4 @@
-// PIE — SMTP test.
+// PIE — mail test.
 //
 //   cd F:\PIE_V3\server
 //   node tools/mail-test.mjs                  → check the config and the connection
@@ -17,8 +17,46 @@ import * as mailer from '../src/mailer.js';
 const line = (l, v) => console.log(`  ${l.padEnd(24)} ${v}`);
 const to = process.argv[2];
 
-console.log('\nPIE — SMTP TEST');
+console.log('\nPIE — MAIL TEST');
 console.log('='.repeat(64));
+
+/* ─────────────────────────────────────────────────────────── HTTPS provider
+   If one is configured it is what PIE actually uses, so checking SMTP below
+   would test a path no message ever takes. This branch runs instead. */
+const http = mailer.httpProvider();
+if (http) {
+  console.log(`\n1. TRANSPORT`);
+  line('MAIL_HTTP_PROVIDER', `${http.name} (${http.label})`);
+  line(http.keyEnv, `set, ${http.key.length} characters (never printed)`);
+  line('MAIL_FROM', http.from);
+  line('endpoint', http.url);
+  console.log('\n  This path uses HTTPS, not SMTP, so it works on hosts that block');
+  console.log('  outbound SMTP ports — Render free web services among them.');
+
+  if (!to) {
+    console.log('\n2. SEND');
+    console.log('  An HTTPS mail API cannot be tested without actually sending.');
+    console.log('  Run:  node tools/mail-test.mjs you@example.com\n');
+    process.exit(0);
+  }
+
+  console.log(`\n2. SEND  → ${to}`);
+  const sent = await mailer.send({
+    to,
+    subject: 'PIE mail test',
+    text: 'If you are reading this, PIE can send email from this deployment.',
+    html: '<p>If you are reading this, PIE can send email from this deployment.</p>',
+  });
+  if (sent.sent) {
+    console.log(`  SENT via ${sent.provider}. Check the inbox (and spam).`);
+    console.log('  The result is recorded, so the running server now reports mail as proven.\n');
+    process.exit(0);
+  }
+  console.log(`  FAILED — ${sent.detail || sent.reason}`);
+  console.log('\n  The usual cause is a sender address on a domain the provider has not');
+  console.log(`  verified. ${http.label} will only send from a domain you own and have proven.\n`);
+  process.exit(1);
+}
 
 /* ------------------------------------------------------------------ config */
 console.log('\n1. CONFIGURATION  (the password is never printed)');

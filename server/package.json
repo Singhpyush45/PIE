@@ -11,6 +11,7 @@
     "test:live": "node --test --test-concurrency=1 test/*.test.mjs"
   },
   "dependencies": {
+    "@sap/hana-client": "^2.29.27",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",

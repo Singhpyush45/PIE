@@ -58,6 +58,7 @@ export const TABLE_MAP = {
   humanDecisions: 'human_decisions',
   learningProgress: 'learning_progress',
   auditEvents: 'audit_events',
+  faceIdentities: 'face_identities',
   // `sessions` is deliberately absent: session tokens stay in server memory and
   // the local store. Shipping them to a hosted database buys nothing and widens
   // the blast radius if the service key ever leaks.
@@ -263,8 +264,8 @@ export function status() {
       ? ((last?.detail ? `${last.detail}${when ? ` (checked ${when})` : ''}` : null)
         || 'Credentials present. Press "Verify connection" to check the schema — nothing is checked until you ask.')
       : `Not configured. PIE is persisting to the local JSON store at server/data/pie.json. Add ${URL_ENV} and ${KEY_ENV} to activate.`,
-    classification: configured ? 'PROPOSED — credentials supplied, schema verified on demand' : 'OPTIONAL — not configured',
-    systemOfRecord: configured ? 'Supabase when mirroring is enabled; JSON store otherwise' : 'Local JSON store',
+    classification: configured ? 'CONFIRMED — durable store; accounts survive a restart' : 'OPTIONAL — not configured',
+    systemOfRecord: configured ? 'Supabase across restarts; the JSON store within a run' : 'Local JSON store',
   };
 }
 
@@ -310,6 +311,9 @@ export async function mirror({ collections = Object.keys(TABLE_MAP), includeDemo
   return { ok: Object.keys(failed).length === 0, pushed, failed };
 }
 
-export const MIRROR_ENABLED = () => process.env.SUPABASE_MIRROR === '1' && isConfigured();
+export const MIRROR_ENABLED = () => process.env.SUPABASE_MIRROR !== '0' && isConfigured();
 
 export const envNames = { URL_ENV, KEY_ENV };
+
+/** The project URL, for logging a host. Never the key. */
+export const envUrl = () => cfg().url;

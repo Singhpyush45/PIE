@@ -17,6 +17,8 @@ import * as githubAdapter from './integrations/githubEvidenceAdapter.js';
 import * as supabase from './persistence/supabase.js';
 import * as mailer from './mailer.js';
 import * as mirror from './persistence/mirror.js';
+import * as hydrate from './persistence/hydrate.js';
+import * as hanaMirror from './persistence/hanaMirror.js';
 import {
   authenticate, requireAuth, rateLimit, str, bad, isEmail,
   sessionUser, publicProfile, publicReq, publicApp, candidateApplications, inWorld,
@@ -38,6 +40,17 @@ app.use(cookieParser());
 app.use(authenticate);
 
 db.load();
+
+// Restore anything this instance has lost before deciding whether to seed.
+//
+// On a host with an ephemeral filesystem the local store is empty on every cold
+// start, and without this line the next step would cheerfully reseed the demo
+// world over the top of an account the candidate created yesterday — which is
+// exactly how a working sign-in becomes "those credentials do not match an
+// account" in production and nowhere else. Runs before the mirror subscribes,
+// so restored rows are not immediately pushed back out as if they were new.
+const hydration = await hydrate.run();
+
 seedIfEmpty();
 
 // Exactly one administrator, provisioned server-side. Never registrable publicly.
@@ -47,6 +60,9 @@ const adminBoot = await ensureAdminAccount();
 // Subscribe the mirror AFTER the store is loaded and seeded, so a boot does not
 // re-push the whole demo world as if it were new writes.
 const mirrorOn = mirror.attach();
+// The enterprise-record path. Off unless SAP_HANA_MIRROR=1 and HANA is
+// configured; attaching is harmless either way.
+hanaMirror.attach();
 
 /* ================================================================== HEALTH */
 app.get('/api/health', (_req, res) => res.json({
@@ -68,10 +84,35 @@ app.get('/api/services', requireAuth, (req, res) => {
       supabase.status(),
       mailer.status(),
       mirror.status(),
+      hydrateStatus(),
+      hanaMirror.status(),
       ...landscape().services,
     ],
   });
 });
+
+/** What the last boot managed to restore. Read by the integrity dashboard. */
+function hydrateStatus() {
+  const configured = supabase.isConfigured();
+  const state = !configured ? 'NOT_CONFIGURED'
+    : hydration?.reason === 'DISABLED' ? 'OFF'
+      : !hydration?.ok ? 'INCOMPLETE'
+        : hydration.total ? 'RESTORED' : 'CURRENT';
+  return {
+    key: 'supabase_hydrate',
+    name: 'Supabase restore at boot',
+    state,
+    detail: configured
+      ? hydration?.detail
+      : 'Supabase is not configured, so nothing is restored at boot. On a host with an ephemeral '
+        + 'filesystem (Render\'s free plan included) that means accounts created in production do not '
+        + 'survive a restart.',
+    classification: state === 'RESTORED' || state === 'CURRENT'
+      ? 'CONFIRMED — Supabase is the durable source of truth across restarts'
+      : 'OPTIONAL — not configured',
+    systemOfRecord: configured ? 'Supabase across restarts; the JSON store within a run' : 'Local JSON store',
+  };
+}
 
 /** Live Supabase reachability + schema check. Admin-only: it names the project host. */
 app.get('/api/system/supabase', requireAuth, async (req, res) => {
@@ -209,7 +250,9 @@ if (process.env.PIE_NO_LISTEN !== '1') {
     warnIfStaleBuild();
     printEnvBanner();
     console.log(`  AI: ${ai.provider} [${ai.mode}]`);
-    if (mirrorOn) console.log('  Supabase mirror: ON (writes are pushed in the background; JSON store is still the system of record)');
+    if (mirrorOn) console.log('  Supabase mirror: ON (writes are pushed in the background)');
+    const restore = hydrate.bootLine(hydration);
+    if (restore) console.log(restore);
     console.log(`  Store: ${c.users} users · ${c.candidateProfiles} candidates · ${c.requisitions} requisitions · ${c.evidence} evidence`);
     if (adminBoot?.created) {
       console.log('\n  ── ADMINISTRATOR ACCOUNT (server console only — never shown in the UI) ──');

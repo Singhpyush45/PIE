@@ -6,7 +6,23 @@ web/.env
 *.log
 shots/
 server/data/pie.json
-.claude/settings.local.json
+
+# Runtime verification records. Machine-specific: they say that THIS deployment
+# proved its SMTP/Supabase/HANA/AI Core connection, so committing them would
+# make one machine's successful check appear as another machine's.
+server/data/service-checks.json
+
+# Local/runtime secrets
 server/data/.token-key
-web/.shot-*
-web/__*
+
+# Claude/local AI workspace
+.claude/
+
+# Local screenshots and generated debug artifacts
+web/.shot-*.png
+web/__*.mjs
+web/__*.png
+web/__*.json
+web/__*.svg
+web/__*.bin
+web/__*.raw
