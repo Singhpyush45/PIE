@@ -35,16 +35,44 @@ discovering it live.
 Read this once before you start, because you are about to point software at a
 real inbox.
 
+### What PIE does
+
 PIE reads **From, Subject and Date** of messages that match its own certificate
 filter. It never asks Gmail for the body of a message — the call is made with
 `format: 'metadata'`, and `server/test/scout.test.mjs` test 6 fails if anyone
 changes that. The search is always AND-ed with PIE's credential filter; a model
-can narrow it and cannot widen it (test 4). Nothing in Gmail can be sent,
-deleted, trashed or modified, because none of those operations is in PIE's
-allowlist (test 1) and the plugin is configured `mode: readonly`.
+can narrow it and cannot widen it (test 4). PIE cannot send, delete, trash or
+modify anything, because none of those operations is in its allowlist (test 1)
+and the plugin runs inside the SDK's `runReadonly` scope.
 
-Use your own account for the demo. Do not add a friend as a test user without
-showing them this page first.
+### What you are granting — which is more
+
+**Read this part. It is not the same sentence.**
+
+The consent screen will ask you to allow:
+
+- Send email on your behalf
+- See and edit your email labels
+- Manage drafts and send emails
+- Read, compose and send emails from your Gmail account
+
+That is not a mistake and it is not something you can turn off.
+`@corsair-dev/gmail` **hard-codes** its OAuth scopes — `gmail.modify`,
+`gmail.labels`, `gmail.send`, `gmail.compose`. There is no `gmail.readonly`
+among them, and `permissions: { mode: 'readonly' }` does **not** narrow them:
+that option governs which SDK operations are allowed to run, not what Google
+asks you to grant.
+
+So both of these are true, and they are different claims:
+
+| | |
+|---|---|
+| PIE cannot send mail on your behalf | enforced by an allowlist and a readonly scope, with tests |
+| The **token** can | it was granted `gmail.send` |
+
+Use an account you are willing to grant that on. Revoke it afterwards at
+<https://myaccount.google.com/permissions>. Do not add a friend as a test user
+without showing them this section first.
 
 ---
 
@@ -81,6 +109,12 @@ https://www.googleapis.com/auth/gmail.readonly
 
 Google will mark it as a restricted scope and warn you. That is expected.
 
+Note that the connect will **not** actually request this scope — Corsair's plugin
+asks for `gmail.modify`, `gmail.labels`, `gmail.send` and `gmail.compose`
+instead, and you cannot change that. Listing `gmail.readonly` here is still
+right: it is what PIE's own use amounts to, and it is what a reviewer should see
+declared. See "What you are granting" above.
+
 On the **Test users** step, add the Gmail address you will demo with. This is
 the step people forget; without it the connect fails with `access_denied` and
 nothing explains why.
@@ -91,9 +125,23 @@ APIs & Services → Credentials → **Create credentials** → **OAuth client ID
 
 - Application type: **Web application**
 - Name: `PIE server`
-- **Authorised redirect URIs**: this must be the URI *Corsair* redirects to, not
-  PIE's own. Open your Corsair dashboard, go to the Gmail plugin, and copy the
-  redirect URI it shows. Paste that exact string here.
+- **Authorised redirect URIs**: paste exactly this, and nothing else:
+
+  ```
+  https://auth.corsair.dev/oauth/callback
+  ```
+
+  This is the URI *Corsair* redirects to, not PIE's own. Google sends the
+  candidate back to Corsair, Corsair exchanges the code and stores the token,
+  and PIE never touches it.
+
+  The number is not a guess. Corsair's SDK builds the callback as
+  `${apiUrl}/oauth/callback`, and `apiUrl` defaults to `https://auth.corsair.dev`
+  — PIE does not override either, so that is the string Google will be asked to
+  redirect to. An earlier version of this page told you to copy it from the
+  Corsair dashboard, which does not work: the dashboard only shows a Gmail
+  plugin once PIE has registered one, and PIE only registers one once these
+  credentials exist. That is a circle with no way in.
 
   Getting this wrong gives you `redirect_uri_mismatch` on the consent screen. It
   is a string comparison — a trailing slash is a mismatch.
@@ -109,8 +157,9 @@ GMAIL_CLIENT_SECRET=<the client secret>
 GMAIL_REDIRECT_URL=<the exact redirect URI you registered in step 4>
 ```
 
-`GMAIL_REDIRECT_URL` is optional — omit it and Corsair uses its default — but if
-you set it, it must match step 4 character for character.
+**Leave `GMAIL_REDIRECT_URL` out.** Omitted, Corsair uses the default — which is
+the string you registered in step 4. Setting it buys nothing and gives you a
+second place for the two to disagree.
 
 ### 6. Prove it
 
@@ -152,6 +201,18 @@ Do not oversell this. The strong claim is the narrow one, and it is true:
 > credential filter — never the body, and it cannot send, delete or modify
 > anything. That restriction is enforced by an allowlist and a read-only policy,
 > and there are tests that fail if either is removed.
+
+**If a judge opens the consent screen, they will see `gmail.send` on it.** Say
+this before they ask, not after:
+
+> Corsair's Gmail plugin has fixed scopes and no read-only option, so the grant
+> is broader than what we use. We show that on the connect screen rather than
+> hiding it. PIE's own restriction is enforced in software — but the honest
+> statement is "PIE will not", not "nothing can".
+
+That answer is worth more than the feature. A team that found the gap in its own
+integration and said so is doing the thing the Bias Audit and human-in-the-loop
+parts of PIE are supposed to be about.
 
 If asked about production: the app is in Google's Testing mode, so it reaches
 allow-listed accounts only. Publishing needs Google's security assessment for

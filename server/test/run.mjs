@@ -67,6 +67,10 @@ const env = {
   // configured path is still covered — just not from here.
   SMTP_HOST: '', SMTP_PORT: '', SMTP_USER: '', SMTP_PASS: '', SMTP_FROM: '', SMTP_SECURE: '',
   MAIL_HTTP_PROVIDER: '', RESEND_API_KEY: '', BREVO_API_KEY: '', MAIL_FROM: '',
+  // The switch as well as the credentials. Clearing the transport but leaving
+  // the switch inherited is half a job: this server has no mail, so the only
+  // honest setting is the absent one, whatever the developer runs locally.
+  EMAIL_VERIFICATION: '',
   // Supabase likewise: hydrate.test.mjs points at its own fake PostgREST, and a
   // real project in .env would otherwise be read — and written to — by a test run.
   SUPABASE_URL: '', SUPABASE_SERVICE_ROLE_KEY: '',
@@ -139,6 +143,7 @@ async function main() {
     'test/checks.test.mjs',
     'test/corsair.test.mjs',
     'test/scout.test.mjs',
+    'test/knowledge.test.mjs',
     'test/facewatch.test.mjs',
     'test/facedetect.test.mjs',
     'test/brief.test.mjs',

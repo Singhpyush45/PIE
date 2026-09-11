@@ -292,6 +292,29 @@ export async function asTenant(tenantId, fn) {
   return runReadonly(() => fn(corsair.withTenant(tenantId)));
 }
 
+/**
+ * Runs `fn` with a tenant-scoped client and NO read-only scope.
+ *
+ * Reserved for writes to Corsair's own tables — the synced-entity cache in
+ * `corsair_entities`. That is PIE's database, holding a copy of data PIE was
+ * already allowed to read.
+ *
+ * The distinction this function turns on is worth stating exactly, because the
+ * word "read-only" is doing two jobs and only one of them is a promise to the
+ * candidate: PIE never writes to a candidate's GitHub or Gmail. It does write
+ * to its own cache, which is what a cache is. Wrapping a cache write in
+ * `runReadonly` would not make the product safer; it would make the sync fail
+ * and teach everyone to distrust the guarantee.
+ *
+ * So this exists, it is used in exactly one place (syncGithub in corsair.js),
+ * and every other path goes through `asTenant` above.
+ */
+export async function asTenantForCache(tenantId, fn) {
+  const corsair = await client();
+  if (!corsair || !tenantId) return null;
+  return fn(corsair.withTenant(tenantId));
+}
+
 /** The management namespace — tenants, plugins, connection state, connect links. */
 export async function manage() {
   return (await client())?.manage ?? null;

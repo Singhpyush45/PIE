@@ -74,8 +74,22 @@ const BREAK_AFTER = 3;
 const BREAK_FOR_MS = 60_000;
 
 function breakerOpen() { return Date.now() < breaker.openUntil; }
-function noteFailure() {
-  breaker.failures += 1;
+
+/**
+ * @param {boolean} transient  The provider was busy rather than broken.
+ *
+ * Congestion is counted at half weight. The breaker exists so that a DEAD key
+ * cannot add twelve seconds to every request, and for that it should trip fast.
+ * But "this model is currently experiencing high demand" is not a dead key: it
+ * clears on its own, usually within seconds, and it arrives in bursts — which
+ * is exactly the shape that tripped a three-strike counter. One busy minute
+ * switched narration off for the next sixty seconds, across the whole app,
+ * during the demo it was meant to protect.
+ *
+ * Six congested calls still open it. Three broken ones still open it at once.
+ */
+function noteFailure(transient = false) {
+  breaker.failures += transient ? 0.5 : 1;
   if (breaker.failures >= BREAK_AFTER) {
     breaker.openUntil = Date.now() + BREAK_FOR_MS;
     breaker.failures = 0;
@@ -150,6 +164,70 @@ export function providerStatus(prefer) {
  * answer to "is your AI layer locked to one vendor?" — and to "can this run
  * without sending candidate data to anyone?".
  */
+/**
+ * Turns a provider's error into one sentence a person can act on.
+ *
+ * Providers answer failures with their own JSON, and PIE was putting that
+ * straight on the screen:
+ *
+ *   Google Gemini: Google Gemini 429: [{ "error": { "code": 429, "message":
+ *   "You exceeded your current quota, please check your plan and billing det
+ *
+ * — truncated mid-word, in a warning box, under a perfectly good answer. It
+ * reads as though the feature is broken. It is not: the answer below it was
+ * produced by the deterministic path, exactly as designed. The raw text also
+ * tells the reader nothing they can use, and "billing" on a demo screen invites
+ * precisely the wrong question from a judge.
+ *
+ * The full text still exists in the server log, where whoever needs it is
+ * already looking.
+ */
+export function explainProviderError(raw) {
+  const s = String(raw || '');
+  if (!s) return null;
+
+  // `complete()` joins EVERY provider's failure with ' | ', so one string can
+  // carry two unrelated faults. Explaining it as a whole attributed OpenAI's
+  // "no credits remaining" to Gemini, whose actual problem was a daily quota —
+  // a sentence that would have sent someone to top up the wrong account.
+  //
+  // Each provider's failure is its own sentence.
+  const parts = s.split(' | ').map(one).filter(Boolean);
+  return [...new Set(parts)].join(' ') || null;
+}
+
+function one(segment) {
+  const s = segment.trim();
+  if (!s) return null;
+
+  // The provider's own name, when the message starts with it. `callRaw`
+  // prefixes "<name>: " and often "<name> <status>: " — so the first segment is
+  // taken, a trailing status code dropped, and anything that does not match a
+  // configured provider is replaced rather than guessed at. Without that last
+  // step, "provider circuit open after repeated failures" became the subject of
+  // its own sentence.
+  const head = s.split(':')[0].replace(/\s+\d{3}\s*$/, '').trim();
+  const known = REGISTRY.some(p => p.name.toLowerCase() === head.toLowerCase());
+  const name = known ? head : 'The model';
+  const say = rest => `${name} ${rest}`;
+
+  // Credits before quota, because both messages mention billing and only one of
+  // them clears by waiting. Telling someone to wait out an empty account is the
+  // wrong advice for the rest of the evening.
+  if (/no credits|add credits|insufficient_quota|insufficient funds|payment required/i.test(s)) {
+    return say('has no credits left on its account.');
+  }
+  if (/\b429\b|quota|rate.?limit/i.test(s)) return say('has reached its request limit for now.');
+  if (/\b503\b|\b529\b|overload|high demand|unavailable/i.test(s)) return say('is busy right now.');
+  if (/\b40[13]\b|api key|unauthor|permission|invalid.*key/i.test(s)) return say('rejected the key it was given.');
+  if (/\b404\b|not found|no longer available|not supported/i.test(s)) return say('does not offer the model PIE asked for.');
+  if (/timeout|abort|ETIMEDOUT|ENOTFOUND|ECONNREFUSED|network|fetch failed/i.test(s)) return say('could not be reached.');
+  if (/circuit open/i.test(s)) return say('is being left alone after repeated failures.');
+  if (/json|unterminated|unparseable/i.test(s)) return say('did not answer in the required format.');
+
+  return say('did not answer.');
+}
+
 export function providerLandscape() {
   const active = activeProvider();
   return {
@@ -213,13 +291,26 @@ async function callRaw(messages, { maxTokens, temperature, json, prefer }) {
  * sense — it is simply being asked too quickly — and one short pause turns a
  * failed run into a successful one.
  *
- * Only once, and only for 429. A daily quota will not clear in three seconds,
- * and retrying a real error is just a slower way to fail.
+ * Only once, and only for the two failures that a pause actually fixes. A bad
+ * key, a retired model or a malformed request will fail identically three
+ * seconds later, and retrying those is just a slower way to fail.
+ *
+ * The two that ARE worth a pause:
+ *
+ *   429 — being asked too quickly, or a quota window that is about to roll.
+ *   503 — "this model is currently experiencing high demand". Congestion on
+ *         Google's side, nothing to do with the request. This one used to fall
+ *         straight through to the fail-over, and with the other provider out of
+ *         credit that meant the whole run degraded because a shared model was
+ *         briefly busy. Three failures of this kind also open the circuit
+ *         breaker, so a minute of congestion switched narration off entirely.
  */
+const RETRYABLE = /\b429\b|\b503\b|\b529\b|rate.?limit|quota|overload|high demand|unavailable|try again/i;
+
 async function withRateLimitRetry(fn) {
   try { return await fn(); }
   catch (e) {
-    if (!/\b429\b|rate.?limit|quota/i.test(String(e.message || ''))) throw e;
+    if (!RETRYABLE.test(String(e.message || ''))) throw e;
     await new Promise(r => setTimeout(r, 3000));
     return fn();
   }
@@ -264,14 +355,20 @@ export async function complete(messages, opts = {}) {
   }
 
   // Only now is this a real failure: every configured provider was asked.
-  noteFailure();
+  //
+  // If EVERY provider was merely busy, the run was unlucky rather than
+  // misconfigured, and the breaker is told so.
+  noteFailure(failures.length > 0 && failures.every(f => RETRYABLE.test(f.error)));
   const first = failures[0];
   return {
     ok: false, text: null,
     provider: first?.provider || chain[0].name,
     mode: 'FALLBACK',
+    // Not `${f.provider}: ${f.error}` — callRaw already puts the provider's name
+    // at the front of its message, and prefixing again produced "Google Gemini:
+    // Google Gemini: Google Gemini 404:" on screen. Three times is not emphasis.
     error: failures.length > 1
-      ? failures.map(f => `${f.provider}: ${f.error}`).join(' | ')
+      ? failures.map(f => f.error).join(' | ')
       : (first?.error || 'the provider did not answer'),
     triedProviders: failures.map(f => f.provider),
   };

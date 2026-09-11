@@ -100,6 +100,63 @@ if (plain.ok) {
       : 'Read the message above — it is the provider\'s own, unedited.';
 
   console.log(`  Most likely:\n  ${hint}\n`);
+
+  // A model name that this key cannot reach is the one failure where guessing is
+  // pointless and the answer is one request away. Ask the provider which models
+  // it will actually serve, and print them.
+  if (/no longer available|does not exist|not found|404/i.test(e)) {
+    const key = (process.env.GEMINI_API_KEY || '').trim();
+    const base = (process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai').replace(/\/+$/, '');
+    if (key) {
+      console.log('  Asking Google which models this key can use…\n');
+      try {
+        const res = await fetch(`${base}/models`, { headers: { Authorization: `Bearer ${key}` } });
+        const body = await res.json();
+        const ids = (body?.data || []).map(m => String(m.id || '').replace(/^models\//, ''))
+          .filter(id => /gemini/.test(id) && !/embedding|aqa|imagen|tts|vision-latest/.test(id));
+
+        if (!ids.length) {
+          console.log('  Google returned no usable model ids for this key.\n');
+        } else {
+          // "Listed" is not "usable". This endpoint returns models the account
+          // cannot actually call — gemini-2.5-flash appears here and answers 404
+          // with "no longer available to new users" — so the wording says what
+          // the list really is, and the suggestion below excludes the one that
+          // just failed. The first version of this recommended exactly the model
+          // the user had come here because it did not work.
+          const failed = (process.env.GEMINI_MODEL || 'gemini-2.5-flash').trim();
+          console.log('  Models Google lists for this key (listed is not the same as usable):');
+          for (const id of ids.slice(0, 20)) {
+            console.log(`    ${id}${id === failed ? '   <- the one that just failed' : ''}`);
+          }
+
+          const usable = ids.filter(id =>
+            id !== failed
+            && !/image|tts|omni|customtools/.test(id));
+
+          // A `-latest` alias is the better default: it follows whatever Google
+          // currently serves, so a model retirement stops being a demo-morning
+          // surprise. Failing that, prefer a plain flash over a preview or a
+          // lite variant.
+          const pick = usable.find(i => i === 'gemini-flash-latest')
+            || usable.find(i => /flash-latest$/.test(i))
+            || usable.find(i => /^gemini-[\d.]+-flash$/.test(i) && !/preview/.test(i))
+            || usable.find(i => /flash/.test(i) && !/preview|lite/.test(i))
+            || usable[0];
+
+          if (pick) {
+            console.log(`\n  Put this in server/.env, then re-run:\n    GEMINI_MODEL=${pick}\n`);
+            if (/latest/.test(pick)) {
+              console.log('  (an alias — it follows whatever Google currently serves, so this');
+              console.log('   does not break again the next time a model is retired)\n');
+            }
+          }
+        }
+      } catch (err) {
+        console.log(`  Could not list models: ${String(err.message || err).slice(0, 120)}\n`);
+      }
+    }
+  }
   console.log('  PIE keeps working either way: scores are deterministic and the agents fall');
   console.log('  back to template narration. What you lose is the Evidence Scout choosing');
   console.log('  what to investigate, and the written explanations being model-written.\n');

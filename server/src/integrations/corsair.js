@@ -43,6 +43,7 @@
 
 import * as checks from '../persistence/checks.js';
 import { fingerprint } from '../persistence/checks.js';
+import * as store from '../store.js';
 import * as sdk from './corsairClient.js';
 
 export const envNames = sdk.envNames;
@@ -245,6 +246,36 @@ export async function connectLink({ tenantId, plugin = 'github' } = {}) {
   const m = await sdk.manage();
   if (!m) return { ok: false, reason: 'CLIENT_FAILED', detail: sdk.lastError() || 'The Corsair client is unavailable.' };
 
+  // Gmail is bring-your-own: Corsair lends PIE its GitHub app but has no Google
+  // one, so the client id and secret have to be in Corsair's key store before a
+  // connect link can be issued at all.
+  //
+  // `ensureGmailKeys()` used to be called only from `scout()` — that is, only
+  // once a candidate had already connected. Which they could not do, because
+  // the link could not be issued, because the keys were not there. The error
+  // said `BYO credentials not configured for 'gmail'` and pointed at Corsair,
+  // where everything was in fact fine.
+  //
+  // It is idempotent and costs one round trip the first time per process.
+  if (plugin === 'gmail') {
+    const keys = await sdk.ensureGmailKeys();
+    if (!keys.ok && keys.reason === 'NOT_CONFIGURED') {
+      return {
+        ok: false,
+        reason: 'GMAIL_NOT_CONFIGURED',
+        // The two REQUIRED names. GMAIL_REDIRECT_URL is also in gmailEnvNames
+        // and is optional — naming it here would send someone to set a variable
+        // that is better left unset.
+        detail: `Gmail needs ${sdk.gmailEnvNames.CLIENT_ID} and ${sdk.gmailEnvNames.CLIENT_SECRET} in server/.env. `
+          + 'See GMAIL_SETUP.md — it is a Google Cloud OAuth client, not a Corsair setting.',
+      };
+    }
+    if (!keys.ok) {
+      return { ok: false, reason: 'GMAIL_KEYS_FAILED',
+        detail: keys.detail || 'The Google client could not be stored in Corsair.' };
+    }
+  }
+
   const r = await attempt('manage.connect.createLink', () => m.connect.createLink({ plugin, tenantId }));
   if (!r.ok) return r;
 
@@ -255,6 +286,30 @@ export async function connectLink({ tenantId, plugin = 'github' } = {}) {
   });
   return { ok: true, connectUrl: r.data?.connectUrl, expiresAt: r.data?.expiresAt || null };
 }
+
+/**
+ * What Google will actually ask for when a candidate connects Gmail.
+ *
+ * This is not what PIE uses, and the difference is the whole point of saying it.
+ *
+ * `@corsair-dev/gmail` hard-codes its OAuth scopes — gmail.modify, gmail.labels,
+ * gmail.send, gmail.compose. `gmail.readonly` is not among them, and
+ * `permissions: { mode: 'readonly' }` does not narrow them: that option governs
+ * which SDK operations are allowed to run, not what the consent screen asks the
+ * candidate to grant.
+ *
+ * So "PIE cannot send mail on your behalf" is true, and "nothing can" is not.
+ * PIE's allowlist offers the model two Gmail operations, both reads, and the
+ * readonly scope throws on the rest — but the token sitting in Corsair's
+ * database was granted send and modify, and a candidate consenting to this
+ * deserves to be told that in the sentence before they click, not after.
+ */
+export const GMAIL_SCOPE_NOTICE =
+  'Google will ask you to grant send, compose, modify and label access. That is Corsair\'s Gmail '
+  + 'plugin asking — its scopes are fixed and it does not offer a read-only one. PIE itself only '
+  + 'ever lists messages and reads their From, Subject and Date, never the body, and it cannot '
+  + 'send, delete or modify anything. But the authorisation you are granting is broader than what '
+  + 'PIE uses, and you can revoke it at myaccount.google.com/permissions.';
 
 /** Which plugins this candidate has actually connected. */
 export async function connectionStatus({ tenantId } = {}) {
@@ -288,6 +343,16 @@ function shapeRepo(x, login) {
   const pushed = x.pushedAt || x.pushed_at || null;
   const language = x.language || null;
   return {
+    // GitHub's own numeric id, carried through rather than dropped.
+    //
+    // PIE does not need it — repositories are identified here by full name —
+    // but Corsair's repository schema does, and it is a number. The sync was
+    // sending the full name as `id` and every upsert was rejected with
+    // "expected number, received string". Nobody noticed, because Corsair syncs
+    // the same repositories itself: `db.repositories.list()` answered happily
+    // from Corsair's own rows, so the store looked populated and the writes
+    // that were failing were the only ones carrying PIE's added fields.
+    githubId: Number.isFinite(Number(x.id)) ? Number(x.id) : null,
     name: x.name || String(x.fullName || x.full_name || '').split('/').pop() || 'repository',
     fullName: x.fullName || x.full_name || (login ? `${login}/${x.name}` : x.name),
     description: x.description || '',
@@ -327,6 +392,40 @@ function monthsBetween(a, b) {
  * result says which of the two it was, because "this was read from a cache" and
  * "this was fetched a second ago" are different claims.
  */
+/**
+ * One row per repository, whatever the source handed over.
+ *
+ * An earlier version of the sync wrote PIE's own copy of every repository into
+ * Corsair's entity table under a different key, alongside the copy Corsair had
+ * synced itself. Four repositories became eight rows. The knowledge base
+ * answered "8 of 8 synced repositories match", and the sync reported "8
+ * repositories are searchable" — which is not merely untidy: it doubles the
+ * apparent size of a candidate's portfolio, and portfolio size is exactly what
+ * a recruiter reads off that screen as evidence.
+ *
+ * The sync no longer writes there. This stays for two reasons: the duplicate
+ * rows it already created are still in the database, and a mirror PIE does not
+ * own can always hand it the same repository twice.
+ *
+ * It lives here, on the read path, so that EVERY consumer is covered. Putting
+ * it only in the knowledge base fixed the answers and left the sync still
+ * counting eight — the same number, wrong in a different place.
+ */
+export function uniqueRepositories(rows) {
+  const fields = r => Object.values(r).filter(v => v !== null && v !== undefined && v !== '').length;
+  const byName = new Map();
+
+  for (const r of rows) {
+    const key = String(r?.fullName || r?.name || '').toLowerCase();
+    if (!key) continue;
+    const seen = byName.get(key);
+    // Keep whichever copy carries more: a sparse duplicate must not displace
+    // the row holding the language and push date a question is matched on.
+    if (!seen || fields(r) > fields(seen)) byName.set(key, r);
+  }
+  return [...byName.values()];
+}
+
 export async function githubRepositories(login, { tenantId, limit = 100 } = {}) {
   if (!isConfigured()) return { ok: false, reason: 'NOT_CONFIGURED' };
   if (!tenantId) return { ok: false, reason: 'NO_TENANT', detail: 'A candidate is required — Corsair reads are tenant-scoped.' };
@@ -341,7 +440,7 @@ export async function githubRepositories(login, { tenantId, limit = 100 } = {}) 
     scoped(t => t.github.db.repositories.list({ limit })));
 
   if (fromDb.ok && Array.isArray(fromDb.data) && fromDb.data.length) {
-    const rows = fromDb.data.map(e => shapeRepo(e?.data ?? e, login)).filter(Boolean);
+    const rows = uniqueRepositories(fromDb.data.map(e => shapeRepo(e?.data ?? e, login)).filter(Boolean));
     if (rows.length) {
       return { ok: true, source: 'corsair-db', repositories: rows };
     }
@@ -359,8 +458,190 @@ export async function githubRepositories(login, { tenantId, limit = 100 } = {}) 
   if (!fromApi.ok) return fromApi;
 
   const list = Array.isArray(fromApi.data) ? fromApi.data : (fromApi.data?.data || []);
-  const rows = list.map(x => shapeRepo(x, login)).filter(Boolean);
+  const rows = uniqueRepositories(list.map(x => shapeRepo(x, login)).filter(Boolean));
   return { ok: true, source: 'corsair-api', repositories: rows };
+}
+
+/* ----------------------------------------------------------------- syncing */
+
+/**
+ * Copies a candidate's GitHub repositories into Corsair's synced-entity store.
+ *
+ * WHY SYNC AT ALL, WHEN THE API WORKS
+ *   Evidence gathering is read-heavy and bursty. A recruiter opens a candidate
+ *   and PIE wants repositories, languages, activity and CI at once; against the
+ *   live API that is a fan-out of calls and a rate limit waiting to happen. Once
+ *   synced it is a query against PIE's own Postgres, and it works when GitHub is
+ *   slow, rate-limiting, or unreachable from a conference network.
+ *
+ *   It is also what makes a knowledge base possible. You cannot search data you
+ *   have not got.
+ *
+ * WHAT IS STORED
+ *   Public repository metadata — the same fields PIE already shows a candidate
+ *   on the import screen. No file contents, no private repository data beyond
+ *   what the candidate's own grant returns, and nothing that is not already
+ *   evidence.
+ *
+ * WHAT "READ-ONLY" MEANS HERE
+ *   Nothing about this writes to GitHub. It writes to `corsair_entities`, which
+ *   is PIE's own table, holding a copy of data PIE was already permitted to
+ *   read. That is why it runs through `asTenantForCache` rather than the
+ *   read-only scope every other path uses — see the comment on that function.
+ */
+/**
+ * Does each repository have GitHub Actions workflows?
+ *
+ * WHY THIS EXISTS
+ *   The repository list endpoint does not say. So `hasWorkflows` was never
+ *   written, the knowledge base's `ci` signal read every row as false, and
+ *   "anything that runs CI?" answered "None of the 4 synced repositories
+ *   match" — a claim about the candidate's engineering practice that PIE had
+ *   no basis for. Either PIE looks, or it says it did not. This is PIE looking.
+ *
+ *   CI is also the strongest cheap signal there is for the thing PIE exists to
+ *   measure. Someone who set up Actions on a personal project is demonstrating
+ *   practice that no degree certificate reports.
+ *
+ * BEST-EFFORT ON PURPOSE
+ *   One extra read per repository, capped, and every failure is swallowed into
+ *   "not observed". A sync that copies twenty repositories must not fail
+ *   because the twenty-first returned a 404, and an unknown is representable —
+ *   which is the whole reason this can afford to give up quietly.
+ *
+ * @returns {Promise<Map<string, boolean>>} keyed by full name; absent = unknown
+ */
+async function enrichFromApi(tenantId, rows, cap = 25) {
+  const extra = new Map();
+
+  for (const repo of rows.slice(0, cap)) {
+    const full = String(repo.fullName || '');
+    const [owner, name] = full.split('/');
+    if (!owner || !name) continue;
+
+    const add = (k, v) => extra.set(full, { ...(extra.get(full) || {}), [k]: v });
+
+    const wf = await attempt('github.api.workflows.list', () =>
+      sdk.asTenant(tenantId, t => t.github.api.workflows.list({ owner, repo: name })));
+
+    if (wf.ok) {
+      const list = Array.isArray(wf.data) ? wf.data : (wf.data?.workflows || wf.data?.items || []);
+      add('hasWorkflows', Array.isArray(list) && list.length > 0);
+    }
+    // Otherwise unknown, and the row simply carries no opinion.
+
+    // How long the work went on for, and the numeric id if the listing did not
+    // carry one. The repository LIST endpoint does not always include
+    // `createdAt`, and without it `monthsActive` is null — so "what has been
+    // worked on for six months or more?" had nothing to compare. Only fetched
+    // when the list did not already answer it, so a complete listing costs
+    // nothing extra.
+    if (repo.monthsActive == null || repo.githubId == null) {
+      const det = await attempt('github.api.repositories.get', () =>
+        sdk.asTenant(tenantId, t => t.github.api.repositories.get({ owner, repo: name })));
+
+      const created = det.ok ? (det.data?.createdAt || det.data?.created_at) : null;
+      const pushed = (det.ok && (det.data?.pushedAt || det.data?.pushed_at)) || repo.pushedAt;
+      const months = monthsBetween(created, pushed);
+      if (months != null) add('monthsActive', months);
+
+      const id = det.ok ? Number(det.data?.id) : NaN;
+      if (Number.isFinite(id)) add('githubId', id);
+    }
+  }
+  return extra;
+}
+
+export async function syncGithub({ tenantId, login = null, limit = 50 } = {}) {
+  if (!isConfigured()) return { ok: false, reason: 'NOT_CONFIGURED' };
+  if (!tenantId) return { ok: false, reason: 'NO_TENANT' };
+
+  // Read through the ordinary read-only path. The fetch half of a sync is still
+  // a read, and it should be as constrained as every other read PIE makes.
+  const fetched = await githubRepositories(login, { tenantId, limit });
+  if (!fetched.ok) return fetched;
+
+  const rows = fetched.repositories || [];
+  if (!rows.length) {
+    return { ok: true, synced: 0, source: fetched.source,
+      detail: 'Nothing to sync — no repositories were visible for this account.' };
+  }
+
+  const extra = await enrichFromApi(tenantId, rows);
+
+  // PIE does NOT write the repositories back into Corsair's entity table.
+  //
+  // It used to, and the attempt taught three things in one evening:
+  //
+  //   1. `id` in Corsair's repository schema is GitHub's number. PIE was
+  //      sending the full name, so every upsert was rejected — invisibly,
+  //      because `db.repositories.list()` kept answering from the rows Corsair
+  //      had synced by itself.
+  //   2. Keyed by full name, PIE's rows did not match Corsair's, so the writes
+  //      that did land created a SECOND copy of every repository. Four
+  //      repositories, eight rows, and a knowledge base answering "8 of 8".
+  //   3. The two fields worth writing — hasWorkflows, monthsActive — are not in
+  //      Corsair's schema and were silently dropped anyway.
+  //
+  // The boundary that follows from that is the right one regardless: Corsair
+  // owns the mirror of what GitHub said, and keeps it current without PIE's
+  // help. PIE owns what PIE concluded. So the derived signals go into PIE's own
+  // store, keyed by tenant and full name, and the two are joined on read.
+  const signals = [];
+  for (const repo of rows) {
+    const key = String(repo.fullName || repo.name || '');
+    if (!key) continue;
+    const found = extra.get(key) || {};
+
+    const record = {
+      id: `${tenantId}::${key}`,
+      tenantId,
+      fullName: key,
+      // Undefined rather than false when PIE could not look. The knowledge base
+      // reports an unobserved signal as unknown, never as "no".
+      hasWorkflows: found.hasWorkflows,
+      monthsActive: found.monthsActive ?? repo.monthsActive ?? null,
+      syncedAt: new Date().toISOString(),
+    };
+    store.upsert('repositorySignals', record);
+    signals.push(record);
+  }
+
+  const observed = signals.filter(r => r.hasWorkflows !== undefined).length;
+  const unread = signals.length - observed;
+
+  // A partial sync says so. "4 repositories synced" when PIE could not read CI
+  // on two of them is how a gap becomes a surprise in front of an audience —
+  // and the knowledge base will report those two as unknown, so the two
+  // statements need to agree.
+  const partly = unread
+    ? ` CI status could not be read for ${unread} of them; those will report as unknown.`
+    : '';
+
+  checks.record('corsair-sync', {
+    ok: unread === 0,
+    detail: `${signals.length} repositories examined, ${observed} with CI status.${partly}`,
+    config: corsairFingerprint(),
+    meta: { synced: signals.length, observed, at: new Date().toISOString() },
+  });
+
+  return {
+    ok: true,
+    synced: signals.length,
+    observed,
+    source: fetched.source,
+    detail: `${signals.length} repositories are searchable, ${observed} of them with their CI `
+      + `status read from GitHub.${partly}`,
+  };
+}
+
+/** How much this candidate has synced, and when. Cheap enough to call on page load. */
+export async function syncStatus({ tenantId } = {}) {
+  if (!isConfigured() || !tenantId) return { ok: false, reason: 'NOT_CONFIGURED', count: 0 };
+  const r = await attempt('github.db.repositories.count', () =>
+    sdk.asTenant(tenantId, t => t.github.db.repositories.count()));
+  if (!r.ok) return { ...r, count: 0 };
+  return { ok: true, count: Number(r.data) || 0 };
 }
 
 /* -------------------------------------------------------------- linking */

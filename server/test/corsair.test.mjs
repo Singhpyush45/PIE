@@ -119,6 +119,98 @@ test('5 — a Corsair that cannot reach its database fails as a state, not a cra
   });
 });
 
+test('5b — a Gmail connect link asks for the Google client, not for Corsair', async () => {
+  // Gmail is bring-your-own: Corsair lends PIE its GitHub app and has no Google
+  // one, so the client id and secret must be in Corsair's key store before a
+  // connect link can be issued.
+  //
+  // PIE wrote them only from `scout()` — which runs after a candidate has
+  // connected. They could not connect, because the link could not be issued,
+  // because the keys were not there. Corsair answered `BYO credentials not
+  // configured for 'gmail'`, which reads as a fault in Corsair, where nothing
+  // was wrong. GitHub worked throughout, so the natural conclusion was that
+  // Gmail's Google Cloud setup was broken — an hour of looking in the wrong
+  // console.
+  //
+  // With no Google credentials configured, the refusal must name the two
+  // environment variables and point at the setup document.
+  await withEnv(FULL, async () => {
+    const r = await corsair.connectLink({ tenantId: 'cand_x', plugin: 'gmail' });
+
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'GMAIL_NOT_CONFIGURED',
+      'an unconfigured Gmail must not reach Corsair and come back blamed on it');
+    assert.match(r.detail, /GMAIL_CLIENT_ID/);
+    assert.match(r.detail, /GMAIL_CLIENT_SECRET/);
+    assert.match(r.detail, /GMAIL_SETUP\.md/);
+
+    // And not the optional one — sending someone to set a variable that is
+    // better left unset is how a redirect_uri_mismatch gets invented.
+    assert.ok(!/GMAIL_REDIRECT_URL/.test(r.detail), `names an optional variable: ${r.detail}`);
+
+    // No secret value is ever in a message shown to a user.
+    assert.ok(!r.detail.includes(process.env.CORSAIR_API_KEY || 'ck_'));
+  });
+});
+
+test('5c — the Gmail scope notice says what Google will actually ask for', () => {
+  // Corsair's Gmail plugin hard-codes gmail.modify, gmail.labels, gmail.send
+  // and gmail.compose. There is no read-only scope, and
+  // `permissions: { mode: 'readonly' }` does not narrow the grant — it governs
+  // which SDK operations may run, not what the consent screen requests.
+  //
+  // PIE's documentation said "it cannot send, delete or modify anything". True
+  // of PIE, false of the token. A candidate who reads that and then sees "Send
+  // email on your behalf" on Google's page has been misled by us, however
+  // accurate the sentence was about our own code.
+  const n = corsair.GMAIL_SCOPE_NOTICE;
+
+  // Names the grant, in the words Google uses.
+  assert.match(n, /send/i);
+  assert.match(n, /compose|modify/i);
+
+  // Says whose limitation it is, and that PIE's own restriction still holds.
+  assert.match(n, /PIE/);
+  assert.match(n, /never the body|From, Subject and Date/i);
+
+  // And tells them how to take it back.
+  assert.match(n, /myaccount\.google\.com\/permissions/);
+
+  // What it must NOT say. This is the claim that was wrong.
+  assert.ok(!/nothing can (send|be sent)/i.test(n));
+  assert.ok(!/read-?only scope/i.test(n) || /does not|broader/i.test(n),
+    'must not imply the OAuth grant itself is read-only');
+});
+
+test('5d — every Corsair variable PIE reads is known to the env doctor', async () => {
+  // The doctor flags near-miss key names as typos. `CORSAIR_TUNNEL` is not a
+  // typo — PIE reads it — but it was reported as one, under a heading that says
+  // "PIE reads exactly: ..." and lists four names that do not include it.
+  //
+  // A diagnostic that calls a working setting a typo is worse than one that
+  // says nothing. The obvious response is to delete the line, which switches
+  // the tunnel back off, and the next failure looks like Corsair's fault.
+  //
+  // So the doctor's list is checked against the source rather than trusted.
+  const { readFileSync } = await import('node:fs');
+  const { readdirSync } = await import('node:fs');
+  const { join } = await import('node:path');
+
+  const read = dir => readdirSync(dir, { withFileTypes: true }).flatMap(e =>
+    (e.isDirectory() ? read(join(dir, e.name))
+      : /\.js$/.test(e.name) ? [readFileSync(join(dir, e.name), 'utf8')] : []));
+
+  const source = read('src').join('\n');
+  const used = [...new Set([...source.matchAll(/env\('((?:CORSAIR|GMAIL)[A-Z_]*)'/g)].map(m => m[1]))];
+  assert.ok(used.includes('CORSAIR_TUNNEL'), 'the fixture for this test has gone stale');
+
+  const doctor = readFileSync('tools/env-doctor.mjs', 'utf8');
+  const unknown = used.filter(name => !doctor.includes(`'${name}'`));
+
+  assert.deepEqual(unknown, [],
+    `env-doctor.mjs does not know about ${unknown.join(', ')} — it will report them as typos`);
+});
+
 test('6 — Corsair is never read without a tenant', async () => {
   await withEnv(FULL, async () => {
     const r = await corsair.githubRepositories('octocat', {});

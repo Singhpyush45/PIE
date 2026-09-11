@@ -47,29 +47,50 @@
     "config": "3fb4a031e597e007",
     "meta": {
       "restored": {},
-      "skipped": 3967,
+      "skipped": 4146,
       "failed": {}
     },
-    "at": "2026-09-11T03:24:21.582Z"
+    "at": "2026-09-11T08:05:02.934Z"
   },
   "corsair": {
     "ok": true,
-    "detail": "Corsair is live against PIE's database — corsair_accounts read, 1 tenant(s). 1 plugin(s): github.",
+    "detail": "Corsair is live against PIE's database — corsair_accounts read, 3 tenant(s). 2 plugin(s): github, gmail. Awaiting credentials: gmail.",
     "config": "0c7e26f91fa7bbb6",
     "meta": {
       "plugins": [
-        "github"
+        "github",
+        "gmail"
       ],
-      "unconfigured": [],
-      "tenants": 1
+      "unconfigured": [
+        "gmail"
+      ],
+      "tenants": 3
     },
-    "at": "2026-09-10T19:13:08.881Z"
+    "at": "2026-09-11T07:32:11.055Z"
   },
   "corsair-github-link": {
     "ok": true,
-    "detail": "A GitHub token was linked to a Corsair tenant.",
+    "detail": "A GitHub token was linked to a Corsair tenant for @Singhpyush45.",
     "config": "0c7e26f91fa7bbb6",
     "meta": null,
-    "at": "2026-09-11T03:04:17.423Z"
+    "at": "2026-09-11T04:34:11.220Z"
+  },
+  "corsair-sync": {
+    "ok": true,
+    "detail": "8 repositories examined, 8 with CI status.",
+    "config": "0c7e26f91fa7bbb6",
+    "meta": {
+      "synced": 8,
+      "observed": 8,
+      "at": "2026-09-11T06:34:01.242Z"
+    },
+    "at": "2026-09-11T06:34:01.245Z"
+  },
+  "corsair-hub": {
+    "ok": true,
+    "detail": "Corsair Hub issued a connect link.",
+    "config": "0c7e26f91fa7bbb6",
+    "meta": null,
+    "at": "2026-09-11T08:08:27.290Z"
   }
 }

@@ -61,6 +61,10 @@ export function registerGithubRoutes(app) {
       scopeNotice: 'Corsair\'s GitHub app asks for the repo, user and read:org scopes, which is more '
         + 'access than PIE uses. PIE\'s own "Connect GitHub" asks for read:user only — prefer it if '
         + 'you would rather grant less.',
+      // Sent whether or not Gmail is configured, because the candidate needs it
+      // BEFORE they press Connect Gmail, not after the consent screen has
+      // already listed four scopes they were not expecting.
+      gmailScopeNotice: corsair.GMAIL_SCOPE_NOTICE,
       ...(r.ok ? {} : { detail: r.detail || null }),
     });
   });
@@ -145,6 +149,56 @@ export function registerGithubRoutes(app) {
     });
 
     res.json({ ...result, connected });
+  });
+
+  /* --------------------------------------------------- sync + knowledge base */
+
+  /** Copies this candidate's repositories into Corsair's database. */
+  app.post('/api/github/corsair/sync', ...asCandidate, rateLimit(6, 60_000), async (req, res) => {
+    const tenantId = corsair.tenantFor(req.user);
+    const login = str(req.body?.login, 60)
+      || connectionFor(req.user.candidateProfileId)?.login || null;
+
+    const r = await corsair.syncGithub({ tenantId, login });
+    if (!r.ok) {
+      return res.status(r.reason === 'NOT_CONFIGURED' ? 409 : 502).json({
+        error: r.detail || 'The sync could not run.', code: r.reason,
+        recovery: 'Connect GitHub first, or import repositories manually.',
+      });
+    }
+    db.audit({ actorId: req.user.id, action: 'evidence.corsair_sync',
+      subjectType: 'candidateProfile', subjectId: req.user.candidateProfileId,
+      meta: { synced: r.synced, source: r.source },
+      note: `${r.synced} repositories copied into Corsair's entity store from ${r.source}.` });
+    res.json(r);
+  });
+
+  /** How many rows this candidate has synced. Cheap; called on page load. */
+  app.get('/api/github/corsair/sync', ...asCandidate, async (req, res) => {
+    res.json(await corsair.syncStatus({ tenantId: corsair.tenantFor(req.user) }));
+  });
+
+  /**
+   * Asks a question of the synced rows.
+   *
+   * Candidate-scoped, like the Scout. The question is answered ONLY from what
+   * has been synced — no live call, and nothing outside those rows. The response
+   * carries its own provenance line rather than leaving the reader to assume.
+   */
+  app.post('/api/github/corsair/ask', ...asCandidate, rateLimit(20, 60_000), async (req, res) => {
+    const question = str(req.body?.question, 300);
+    if (!question) return bad(res, 'Ask a question about the synced repositories.');
+
+    const { ask } = await import('../ai/knowledgeBase.js');
+    const r = await ask({ tenantId: corsair.tenantFor(req.user), question });
+
+    db.audit({ actorId: req.user.id, action: 'evidence.knowledge_query',
+      subjectType: 'candidateProfile', subjectId: req.user.candidateProfileId,
+      meta: { mode: r.mode, rows: r.rows ?? 0, matches: r.matches?.length ?? 0 },
+      note: `Knowledge base query over ${r.rows ?? 0} synced row(s): ${r.matches?.length ?? 0} match(es). `
+        + `Answered from Corsair's database only.` });
+
+    res.json(r);
   });
 
   /* ---------------------------------------------------------------- status */

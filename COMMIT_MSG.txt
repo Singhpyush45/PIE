@@ -1,0 +1,88 @@
+Knowledge base, and stop claiming what PIE has not checked
+
+Adds the Hack & Build brief's third use case and fixes a class of bug that
+ran through the second: answering confidently about things nobody looked at.
+
+KNOWLEDGE BASE (new)
+
+  Ask a candidate's synced repositories a question in English. Two steps kept
+  apart on purpose: a model reads the QUESTION into filters from a closed
+  vocabulary, then PIE matches those filters against the rows itself. The model
+  never decides the answer, never sees a score, and cannot return a repository
+  that is not in the database. Every match states why it matched, and every
+  answer carries its provenance.
+
+  Without a model the same question is parsed by keyword against the same
+  vocabulary, so the demo works with no provider at all.
+
+"NOT CHECKED" IS NOT "NO"
+
+  `hasWorkflows` was never synced, so `Boolean(undefined)` made every row fail
+  the CI test and the answer read "None of the 4 synced repositories match runs
+  CI". That is a claim about the candidate's engineering practice that PIE had
+  no basis for — it had never looked. A recruiter cannot tell that apart from a
+  real negative.
+
+  Signals now carry `observed` as well as `test`. An unobserved signal is set
+  aside and named rather than silently answered no. And the sync now reads
+  GitHub Actions per repository, so the CI signal is real evidence.
+
+CORSAIR: WHO OWNS WHAT
+
+  PIE was writing repositories into Corsair's entity table. Three things were
+  wrong at once: `id` is GitHub's number and PIE sent the full name, so every
+  upsert was rejected — invisibly, because Corsair syncs the same repositories
+  itself and the reads kept working. The writes that did land used a different
+  key, so four repositories became eight rows and the knowledge base answered
+  "8 of 8", doubling the apparent size of a portfolio. And the two fields worth
+  writing were not in Corsair's schema and were dropped anyway.
+
+  Corsair owns the mirror of what GitHub said. PIE owns what PIE concluded.
+  Derived signals move to PIE's own store and are joined on read; the read path
+  dedupes, so the rows the old sync left behind are counted once.
+
+PROVIDERS
+
+  503 "experiencing high demand" was not retried and went straight to fail-over;
+  with the other provider out of credit, a busy minute degraded every run and
+  three of them opened the circuit breaker for sixty seconds. Congestion is now
+  retried once and counted at half weight.
+
+  Provider errors reached the screen as raw JSON, truncated mid-word, under a
+  correct answer. They are now one sentence each — and attributed correctly:
+  explaining the joined failure string as a whole blamed OpenAI's "no credits
+  remaining" on Gemini, whose problem was a daily quota.
+
+GMAIL
+
+  `ensureGmailKeys()` ran only from `scout()`, which runs after a candidate has
+  connected. They could not connect, because the link needed the keys. Corsair
+  answered "BYO credentials not configured", which reads as a fault in Corsair,
+  where nothing was wrong.
+
+  Also: the plugin hard-codes gmail.modify, gmail.labels, gmail.send and
+  gmail.compose, and `permissions: { mode: 'readonly' }` does not narrow the
+  grant. "PIE cannot send mail" is true; "nothing can" is not. The connect
+  screen now says so before the button is pressed, and GMAIL_SETUP.md no longer
+  claims otherwise.
+
+TOOLS AND TESTS
+
+  env-doctor: reports keys set on more than one line (Node's loadEnvFile lets
+  the LAST win, so editing the first changes nothing while the file reads as if
+  it did); knows the optional variables it was calling typos; finds typos by
+  edit distance rather than a hand-written list that missed CORSIAR.
+
+  Test harness pinned EMAIL_VERIFICATION. A developer with it off in their own
+  .env saw eighteen failures across otphttp and gate, all reporting NO_CODE. And
+  stop() now waits for the server to exit before removing its data directory —
+  every test passed and the teardown failed with ENOTEMPTY about one run in six.
+
+  corsair-probe.mjs: prints what is actually in the entity store and what the
+  enrichment calls return, so "CI has not been synced" can be diagnosed without
+  a round trip.
+
+17/17 test files. New behaviour mutation-verified.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Gyj9uyPcBL6pAkcNjUjr76

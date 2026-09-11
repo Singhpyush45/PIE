@@ -125,6 +125,21 @@ export async function startPie({ name, env: extra = {} } = {}) {
         SMTP_PASS: 'not-a-real-password',
         SMTP_FROM: 'PIE <pie@example.test>',
         SMTP_SECURE: 'false',
+        // Pinned for the same reason the SMTP settings above are pinned, and
+        // missed because it is a switch rather than a credential.
+        //
+        // Every file that starts a PIE here does so BECAUSE it is testing the
+        // verification path — that is what the fake SMTP is for. Left
+        // uninherited, a developer with EMAIL_VERIFICATION=off in their own
+        // server/.env watched otphttp and gate fail eighteen tests between
+        // them, all of them reporting NO_CODE: registration had signed the
+        // candidate straight in, so there was never a code to check. Nothing
+        // was wrong with PIE, and nothing was wrong with the tests. The suite
+        // was simply answering a question about the developer's .env.
+        //
+        // A file that wants it off says so in `extra`, which is where a
+        // deliberate choice belongs.
+        EMAIL_VERIFICATION: 'on',
         // A real key or URL in the developer's own server/.env must not be read
         // — still less written to — by a test run.
         OPENAI_API_KEY: '', GEMINI_API_KEY: '',
@@ -197,10 +212,35 @@ export async function startPie({ name, env: extra = {} } = {}) {
     return null;
   }
 
+  /**
+   * Shuts the server down and removes its data directory — in that order, and
+   * actually waiting for the first part.
+   *
+   * `server.kill()` sends a signal and returns; it does not wait. So the
+   * directory was being removed while PIE was still exiting, and PIE flushes
+   * its JSON store on the way out. Every test in the file would pass and the
+   * teardown hook would then fail with
+   *
+   *     ENOTEMPTY: directory not empty, rmdir '.../data/.test-gate'
+   *
+   * which node reports as a failing test file. Roughly one run in six — often
+   * enough to be noticed, rarely enough to be blamed on whatever was changed
+   * that afternoon. Twice today it was.
+   *
+   * So: wait for the exit, escalate to SIGKILL if the process is wedged, and
+   * let the removal retry, because on Windows a file handle can outlive the
+   * process that held it by a few milliseconds.
+   */
   async function stop() {
-    try { server.kill(); } catch { /* already gone */ }
+    if (server && server.exitCode === null && !server.killed) {
+      const exited = new Promise(resolve => server.once('exit', resolve));
+      try { server.kill(); } catch { /* already gone */ }
+      const forced = setTimeout(() => { try { server.kill('SIGKILL'); } catch { /* gone */ } }, 2000);
+      await Promise.race([exited, new Promise(r => setTimeout(r, 5000))]);
+      clearTimeout(forced);
+    }
     smtp.close();
-    await rm(DATA_DIR, { recursive: true, force: true });
+    await rm(DATA_DIR, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 
   return { BASE, api, codeFor, messages: smtp.messages, output: () => out, stop };

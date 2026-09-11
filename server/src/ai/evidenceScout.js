@@ -43,7 +43,7 @@
 //   plainly that findings are data. This is a real attack surface for a hiring
 //   product, because the person with the motive is the one supplying the text.
 
-import { completeJson, untrusted, providerStatus } from './provider.js';
+import { completeJson, untrusted, providerStatus, explainProviderError } from './provider.js';
 import * as tools from '../integrations/corsairTools.js';
 
 /** How much work one scouting run may do. Bounds cost, latency and blast radius. */
@@ -208,7 +208,9 @@ async function decide({ catalogue, targetSkills, log, login }) {
     // — and means a provider that is failing EVERY call is indistinguishable
     // from one that is simply absent. The Scout is the component where that
     // silence costs something visible, so it reports the reason instead.
-    lastModelError = r.error || 'the reply was not usable JSON';
+    // One sentence. The raw provider JSON belongs in the log, not on a screen
+    // a recruiter or a judge is reading — see explainProviderError.
+    lastModelError = explainProviderError(r.error) || 'The model did not reply in usable JSON.';
     return null;
   }
   lastModelError = null;

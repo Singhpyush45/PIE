@@ -30,19 +30,34 @@ const ok = s => `  [ok]   ${s}`;
 const bad = s => `  [FIX]  ${s}`;
 const info = s => `         ${s}`;
 
-function parse(file) {
+/** Keys set on more than one line, with those line numbers. Filled by parse(). */
+const duplicates = new Map();
+
+function parse(file, track = false) {
   if (!fs.existsSync(file)) return null;
   const map = new Map();
-  for (const raw of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+  const seen = new Map();
+
+  fs.readFileSync(file, 'utf8').split(/\r?\n/).forEach((raw, i) => {
     const line = raw.trim();
-    if (!line || line.startsWith('#')) continue;
+    if (!line || line.startsWith('#')) return;
     const m = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/.exec(line);
-    if (m) map.set(m[1], m[2].trim().replace(/^["']|["']$/g, ''));
-  }
+    if (!m) return;
+    const key = m[1];
+
+    // Node's loadEnvFile lets the LAST occurrence win — measured, not assumed.
+    // So a duplicate is not cosmetic: edit the first one and nothing changes,
+    // while the file reads as if it did.
+    if (track) {
+      if (seen.has(key)) duplicates.set(key, [...(duplicates.get(key) || [seen.get(key)]), i + 1]);
+      seen.set(key, i + 1);
+    }
+    map.set(key, m[2].trim().replace(/^["']|["']$/g, ''));
+  });
   return map;
 }
 
-const env = parse(ENV);
+const env = parse(ENV, true);
 if (!env) {
   console.log(`\n  No .env at ${ENV}\n  Run: node tools\\env-fix.mjs\n`);
   process.exit(1);
@@ -50,6 +65,22 @@ if (!env) {
 
 console.log('\n  Checking server/.env\n');
 const problems = [];
+
+/* ------------------------------------------------------------ duplicate keys */
+// Expensive and completely silent. A GEMINI_MODEL added near the top of the
+// file while an older one sat further down meant the server kept using the old
+// model, the file looked right, and every check agreed with the file rather
+// than with the server. This runs over EVERY key, not just Corsair's four,
+// because the trap has nothing to do with which key it happens to be.
+if (duplicates.size) {
+  problems.push('duplicates');
+  console.log(bad('These keys are set on more than one line. The LAST one wins:'));
+  for (const [key, lines] of duplicates) {
+    const winner = lines[lines.length - 1];
+    console.log(info(`  ${key} — lines ${lines.join(', ')}   (line ${winner} is the one in effect: ${env.get(key) ? 'set' : 'empty'})`));
+  }
+  console.log(info('Delete the lines you do not want. Editing the earlier one changes nothing.\n'));
+}
 
 /* ---------------------------------------------------------- pasted elsewhere */
 // The commonest cause of "I definitely pasted it": it went into the template
@@ -80,13 +111,56 @@ if (rootEnv) {
 
 /* -------------------------------------------------------------- misspelt keys */
 const EXPECTED = ['CORSAIR_API_KEY', 'CORSAIR_SIGNING_SECRET', 'CORSAIR_KEK', 'CORSAIR_DATABASE_URL'];
-const nearMiss = [...env.keys()].filter(k =>
-  !EXPECTED.includes(k) && /CORSAIR|CORSAIER|CROSSAIR|COSAIR|DATABASE_URL|DB_URL/i.test(k));
+
+/**
+ * Real variables PIE reads that are not among the required four.
+ *
+ * Without this list the typo check flagged `CORSAIR_TUNNEL` — a correct,
+ * documented line — and told the reader to fix it. A diagnostic that calls a
+ * working setting a typo is worse than one that says nothing: the obvious
+ * response is to delete the line, which silently switches the tunnel off again,
+ * and the next failure looks like Corsair's fault.
+ *
+ * Kept in step with the source by `npm test`, which greps for env() calls.
+ */
+const ALSO_REAL = ['CORSAIR_TUNNEL', 'CORSAIR_DB_POOL_MAX',
+  'GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REDIRECT_URL'];
+
+/**
+ * Edit distance, capped — enough to tell a typo from a different word.
+ *
+ * The first version of this check listed misspellings by hand: CORSAIER,
+ * CROSSAIR, COSAIR. A test fixture containing `CORSIAR_API_KEY` — a plain
+ * transposition, and the likeliest typo of the six — walked straight past it,
+ * because nobody had thought of that one. A hand-written list of mistakes only
+ * catches the mistakes its author happened to imagine.
+ */
+function distance(a, b) {
+  if (Math.abs(a.length - b.length) > 2) return 9;
+  let prev = [...Array(b.length + 1).keys()];
+  for (let i = 1; i <= a.length; i += 1) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j += 1) {
+      row[j] = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = row;
+  }
+  return prev[b.length];
+}
+
+const REAL = [...EXPECTED, ...ALSO_REAL];
+const nearMiss = [...env.keys()].filter(k => {
+  if (REAL.includes(k)) return false;
+  const up = k.toUpperCase();
+  // Close to a name PIE reads, or shaped like one of the database variables.
+  return REAL.some(name => distance(up, name) <= 2) || /^(CORSAIR|DATABASE_URL|DB_URL)/i.test(up);
+});
 if (nearMiss.length) {
   problems.push('typo');
   console.log(bad('These key names look like typos of the ones PIE reads:'));
   for (const k of nearMiss) console.log(info(`  ${k}`));
-  console.log(info(`PIE reads exactly: ${EXPECTED.join(', ')}\n`));
+  console.log(info(`PIE requires exactly: ${EXPECTED.join(', ')}`));
+  console.log(info(`It also reads, optionally: ${ALSO_REAL.join(', ')}\n`));
 }
 
 /* ------------------------------------------------------------------- the four */

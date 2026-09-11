@@ -207,6 +207,36 @@ test('12 — no provider key ever appears in the landscape', async () => {
   assert.ok(!wire.includes('g-secret-value'));
 });
 
+test('12b — a failure is explained in one sentence, and blamed on the right provider', async () => {
+  const m = await providersWith({ OPENAI_API_KEY: 'sk-x', GEMINI_API_KEY: 'g-x' });
+  const { explainProviderError } = m;
+
+  // `complete()` joins every provider's failure with ' | ', so one string can
+  // carry two unrelated faults. Explained as a whole, OpenAI's "no credits
+  // remaining" was attributed to Gemini — whose actual problem was a daily
+  // quota. Someone following that sentence would have topped up the wrong
+  // account and still had nothing working.
+  const both = 'Google Gemini: Google Gemini 429: [{ "error": { "code": 429, "message": '
+    + '"You exceeded your current quota, please check your plan and billing details'
+    + ' | OpenAI 429: { "error": { "message": "You have no credits remaining. Add credits to';
+  const said = explainProviderError(both);
+
+  assert.match(said, /Google Gemini has reached its request limit/);
+  assert.match(said, /OpenAI has no credits left/);
+  assert.ok(!/Google Gemini has no credits/.test(said), `wrong provider blamed: ${said}`);
+
+  // And none of it is the provider's raw JSON, which is what was on screen.
+  assert.ok(!said.includes('{'), 'raw JSON must not reach the reader');
+  assert.ok(!said.includes('"error"'));
+  assert.ok(said.length < 200, `too long to read at a glance: ${said.length} chars`);
+
+  // A message with no provider prefix must not become the subject of its own
+  // sentence — "provider circuit open after repeated failures is being left
+  // alone after repeated failures" was a real line.
+  assert.match(explainProviderError('provider circuit open after repeated failures'), /^The model /);
+  assert.equal(explainProviderError(''), null);
+});
+
 /* ══════════════════════════════════════════════════════ THE SUPABASE MIRROR */
 
 async function freshMirror(envs = {}) {

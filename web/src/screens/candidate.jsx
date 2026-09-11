@@ -505,6 +505,7 @@ function ImportView({ ctx }) {
         { key: 'resume', label: 'Resume', icon: 'file' },
         { key: 'github', label: 'GitHub', icon: 'github' },
         { key: 'scout', label: 'Evidence Scout', icon: 'plug' },
+        { key: 'ask', label: 'Ask your evidence', icon: 'eye' },
         { key: 'project', label: 'Project', icon: 'layers' },
         { key: 'certificate', label: 'Certificate', icon: 'award' },
         { key: 'hackathon', label: 'Hackathon', icon: 'trophy' },
@@ -513,6 +514,7 @@ function ImportView({ ctx }) {
       {tab === 'resume' && <ResumeImport ctx={ctx} />}
       {tab === 'github' && <GithubImport ctx={ctx} />}
       {tab === 'scout' && <EvidenceScoutCard ctx={ctx} />}
+      {tab === 'ask' && <KnowledgeBaseCard ctx={ctx} />}
       {tab === 'project' && <ProjectImport ctx={ctx} />}
       {tab === 'certificate' && <CertificateImport ctx={ctx} />}
       {tab === 'hackathon' && <HackathonImport ctx={ctx} />}
@@ -615,6 +617,19 @@ function EvidenceScoutCard({ ctx }) {
           </Button>
         </div>
 
+        {/* Before the button is pressed, not after.
+            Corsair's Gmail plugin has fixed OAuth scopes — send, compose,
+            modify, labels — and no read-only one. PIE uses none of them beyond
+            two read calls, but the consent screen asks for all four, and a
+            candidate who reads "PIE cannot send mail" and then sees "Send email
+            on your behalf" on Google's page has been misled by us, however
+            true the first sentence was about PIE. */}
+        {status.gmailScopeNotice && (
+          <Alert tone="warn" title="Gmail asks for more than PIE uses" icon="lock">
+            <p className="t-12">{status.gmailScopeNotice}</p>
+          </Alert>
+        )}
+
         <div className="field">
           <label htmlFor="scout-login">GitHub username (optional)</label>
           <input id="scout-login" value={login} onChange={e => setLogin(e.target.value)}
@@ -632,11 +647,13 @@ function EvidenceScoutCard({ ctx }) {
             <Alert tone={run.mode === 'AGENT' ? 'ok' : 'warn'} title={run.notice}>
               <p className="t-12">{run.boundary}</p>
               {run.modelError && (
-                // The provider's own message. A degraded agent that will not say
-                // why is a bug report nobody can act on.
-                <p className="t-11 mono muted" style={{ marginTop: 6 }}>
-                  {run.provider}: {run.modelError}
-                  <br />Diagnose with <b>node tools/ai-test.mjs</b>
+                // Why it degraded, in one sentence. A degraded agent that will
+                // not say why is a bug report nobody can act on — but the
+                // provider's raw JSON was not that explanation, it was just
+                // noise with a stack of quotation marks in it.
+                <p className="t-11 muted" style={{ marginTop: 6 }}>
+                  {run.modelError} The evidence below was gathered with PIE's fixed plan.
+                  <br /><span className="mono">node tools/ai-test.mjs</span> diagnoses the provider.
                 </p>
               )}
             </Alert>
@@ -658,6 +675,152 @@ function EvidenceScoutCard({ ctx }) {
                 </div>
               ))}
               {!run.callLog.length && <Empty title="No calls were made" line={run.notice} />}
+            </div>
+          </>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+/**
+ * The knowledge base — questions answered from synced rows, and only those.
+ *
+ * The screen's job is to make the boundary visible. Two things are always on it:
+ * how many rows were searched, and the provenance line saying the answer came
+ * out of Corsair's database rather than a model's memory. Without those, an
+ * answer here is indistinguishable from a guess — and a recruiter has no way to
+ * tell which they are reading.
+ */
+function KnowledgeBaseCard({ ctx }) {
+  const [synced, setSynced] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [question, setQuestion] = useState('');
+  const [result, setResult] = useState(null);
+
+  const load = useCallback(async () => {
+    try { setSynced(await api.corsairSyncStatus()); }
+    catch { setSynced({ ok: false, count: 0 }); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function sync() {
+    setBusy(true);
+    try {
+      const r = await api.corsairSync({});
+      ctx.notify('ok', r.detail || `${r.synced} repositories synced.`);
+      await load();
+    } catch (e) { ctx.notify('crit', e.message); }
+    setBusy(false);
+  }
+
+  async function ask(q) {
+    const asked = (q ?? question).trim();
+    if (!asked) return;
+    setBusy(true); setResult(null);
+    try { setResult(await api.corsairAsk(asked)); }
+    catch (e) { ctx.notify('crit', e.message); }
+    setBusy(false);
+  }
+
+  const count = synced?.count ?? 0;
+
+  const EXAMPLES = [
+    'which of these are JavaScript?',
+    'anything that runs CI?',
+    'what has been worked on for six months or more?',
+    'show me everything',
+  ];
+
+  return (
+    <Card flush>
+      <CardHead icon="eye" eyebrow="Knowledge base" title="Ask your evidence"
+        sub="Questions answered from repositories synced into Corsair's database"
+        right={<Badge tone={count ? 'ok' : 'off'} dot>{count} synced</Badge>} />
+
+      <div className="card__body stack">
+        <p className="lede">
+          Once your repositories are synced, PIE can answer questions about them without calling
+          GitHub at all — a query against its own database. Ask in plain English.
+        </p>
+
+        <Alert tone="info" title="How an answer is produced" icon="lock">
+          <p>A model reads your <b>question</b> and turns it into filters — languages, signals,
+            keywords — chosen from a fixed list. PIE then applies those filters to the synced rows
+            itself.</p>
+          <p className="t-12">So the model helps work out what you asked. It never decides what the
+            answer is, and it cannot return a repository that is not in the database. Every result
+            below says why it matched.</p>
+        </Alert>
+
+        <div className="row row--wrap">
+          <Button variant={count ? 'secondary' : 'primary'} icon="refresh" disabled={busy} onClick={sync}>
+            {busy ? 'Working…' : count ? 'Re-sync from GitHub' : 'Sync my repositories'}
+          </Button>
+          {!count && <span className="t-12 muted">Nothing is synced yet — sync first, then ask.</span>}
+        </div>
+
+        <div className="field">
+          <label htmlFor="kb-q">Your question</label>
+          <input id="kb-q" value={question} disabled={!count}
+            onChange={e => setQuestion(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') ask(); }}
+            placeholder={count ? 'which of these use Python and run CI?' : 'sync first'} />
+        </div>
+
+        <div className="row row--wrap" style={{ gap: 6 }}>
+          <Button variant="primary" icon="eye" disabled={busy || !count} onClick={() => ask()}>Ask</Button>
+          {count > 0 && EXAMPLES.map(x => (
+            <Button key={x} size="sm" variant="ghost" disabled={busy}
+              onClick={() => { setQuestion(x); ask(x); }}>{x}</Button>
+          ))}
+        </div>
+
+        {result && (
+          <>
+            {/* "PIE has not synced that" is not a warning — it is the system
+                being precise about its own limits, which is the point. Warning
+                yellow made a correct, careful answer look like a malfunction. */}
+            <Alert
+              tone={result.matches?.length ? 'ok' : (result.notObserved ? 'info' : 'warn')}
+              title={result.answer}
+            >
+              {result.restated && <p className="t-12">Understood as: {result.restated}</p>}
+              {result.filters?.length > 0 && (
+                <p className="t-12">Filters applied: {result.filters.join(' · ')}</p>
+              )}
+              {/* The part of the question PIE did not answer, said out loud.
+                  Without this the reader assumes everything asked was tested. */}
+              {result.notObserved && (
+                <p className="t-12"><b>Not checked:</b> {result.notObserved}</p>
+              )}
+              {/* Always shown. An answer without its provenance is a claim. */}
+              <p className="t-11 muted" style={{ marginTop: 6 }}>{result.provenance}</p>
+              {/* One quiet sentence, not the provider's raw JSON. The answer
+                  above it is complete either way — the deterministic path is
+                  the product, not a fallback for when the model works. */}
+              {result.modelError && (
+                <p className="t-11 muted">{result.modelError} The question was read by keyword instead.</p>
+              )}
+            </Alert>
+
+            <div className="stack" style={{ gap: 8 }}>
+              {(result.matches || []).map(m => (
+                <div key={m.fullName} className="callrow">
+                  <div className="row" style={{ gap: 8, alignItems: 'baseline' }}>
+                    <b className="t-13">{m.name}</b>
+                    {m.language && <Badge tone="info">{m.language}</Badge>}
+                    {m.stars > 0 && <span className="t-11 muted">{m.stars} stars</span>}
+                    {m.pushedAt && <span className="t-11 muted">pushed {m.pushedAt}</span>}
+                  </div>
+                  {m.description && <div className="t-12">{m.description}</div>}
+                  <div className="t-11 muted">Matched because: {m.because.join(' · ')}</div>
+                </div>
+              ))}
+              {result.matches?.length === 0 && (
+                <Empty title="No matches" line="Nothing in the synced rows satisfies that question. PIE does not widen the search to find something to say." />
+              )}
             </div>
           </>
         )}

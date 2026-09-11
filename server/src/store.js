@@ -32,6 +32,18 @@ export const COLLECTIONS = [
   // Single-use tickets proving a live face check passed. Short-lived, bound to
   // one candidate, not mirrored — a lost ticket costs one re-check.
   'identityChecks',
+  // What PIE worked out about a synced repository that GitHub does not state:
+  // whether it runs CI, and how long it was worked on. One row per candidate
+  // per repository.
+  //
+  // These live here rather than in Corsair's entity table for a reason PIE
+  // learned the hard way. Corsair owns the GitHub mirror and its repository
+  // schema is GitHub's shape; writing PIE's derived fields into it silently
+  // dropped them, and writing under PIE's own entity key produced a second copy
+  // of every repository — eight rows for four repositories. Corsair holds what
+  // GitHub said. This holds what PIE concluded. Not mirrored: a re-sync
+  // recreates every row from the API in seconds.
+  'repositorySignals',
 ];
 
 const empty = () => Object.fromEntries(COLLECTIONS.map(c => [c, []]));
