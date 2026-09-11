@@ -7,7 +7,7 @@ Send to: **tech4hack.community@gmail.com**
 **Subject:**
 
 ```
-Hack & Build 2026 Submission — Vision Nexus
+Hack & Build 2026 Submission — Team Drishti
 ```
 
 **Body:**
@@ -17,7 +17,7 @@ Hello,
 
 Submitting our project for Hack & Build 2026.
 
-Team Name:           Vision Nexus
+Team Name:           Team Drishti
 Team Leader Name:    Snehal Vats
 Team Leader Email:   Snehalvats2021@gmail.com
 Team Leader Phone:   +91 93105 80094
@@ -31,7 +31,7 @@ Corsair tools, and a knowledge base over the synced rows.
 
 Thank you,
 Rahul Pratap Singh
-Vision Nexus — Galgotias University
+Team Drishti — Galgotias University
 ```
 
 ---
