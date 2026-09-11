@@ -330,15 +330,30 @@ if (process.env.PIE_NO_LISTEN !== '1') {
     if (restore) console.log(restore);
     console.log(`  Store: ${c.users} users · ${c.candidateProfiles} candidates · ${c.requisitions} requisitions · ${c.evidence} evidence`);
     if (adminBoot?.created) {
-      console.log('\n  ── ADMINISTRATOR ACCOUNT (server console only — never shown in the UI) ──');
+      console.log('\n  ── ADMINISTRATOR ACCOUNT ──');
       console.log(`     username: ${adminBoot.username}`);
       console.log(`     email:    ${adminBoot.email}`);
-      console.log(`     password: ${adminBoot.password}`);
+
+      // The password is printed ONLY when PIE generated it, because otherwise
+      // nobody can sign in — there is nowhere else it exists.
+      //
+      // A password the operator CHOSE is never printed. They already have it,
+      // so printing it buys nothing and costs a great deal: "server console"
+      // stopped meaning a terminal on your own machine the moment this was
+      // deployed. On Render the boot log is a web page, kept, and pasted into
+      // chats when something needs debugging. That is exactly how this one
+      // reached a transcript.
       if (adminBoot.generated) {
-        console.log('     ^ generated because ADMIN_PASSWORD was not set. Set it in server/.env');
-        console.log('       to choose your own, then delete server/data/pie.json and restart.');
+        console.log(`     password: ${adminBoot.password}`);
+        console.log('     ^ generated because ADMIN_PASSWORD was not set — copy it now.');
+        console.log('       Set ADMIN_PASSWORD to choose your own; it will not be printed.');
+        if (process.env.NODE_ENV === 'production') {
+          console.log('       This log is not private. Set ADMIN_PASSWORD and redeploy.');
+        }
+      } else {
+        console.log('     password: from ADMIN_PASSWORD — not printed.');
       }
-      console.log('  ────────────────────────────────────────────────────────────────────────\n');
+      console.log('  ───────────────────────────\n');
     } else {
       console.log(`  Admin: sign in as "${adminBoot?.username || 'admin'}" (password set previously; not printed)`);
     }

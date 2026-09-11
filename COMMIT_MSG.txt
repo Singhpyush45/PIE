@@ -83,6 +83,3 @@ TOOLS AND TESTS
   a round trip.
 
 17/17 test files. New behaviour mutation-verified.
-
-Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01Gyj9uyPcBL6pAkcNjUjr76

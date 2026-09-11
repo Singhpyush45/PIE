@@ -553,8 +553,23 @@ async function enrichFromApi(tenantId, rows, cap = 25) {
 }
 
 export async function syncGithub({ tenantId, login = null, limit = 50 } = {}) {
-  if (!isConfigured()) return { ok: false, reason: 'NOT_CONFIGURED' };
-  if (!tenantId) return { ok: false, reason: 'NO_TENANT' };
+  // Both of these carry a `detail`, because the caller shows it and an
+  // unexplained refusal is the thing this file keeps having to fix. On a
+  // deployment with no Corsair configured, "The sync could not run." was the
+  // whole message, under a button that could never work, next to a recovery
+  // line telling the candidate to connect GitHub — which would not have helped.
+  if (!isConfigured()) {
+    return {
+      ok: false,
+      reason: 'NOT_CONFIGURED',
+      detail: 'Corsair is not configured on this server, so there is nothing to sync into. '
+        + 'Import repositories with "Connect GitHub" instead.',
+    };
+  }
+  if (!tenantId) {
+    return { ok: false, reason: 'NO_TENANT',
+      detail: 'No candidate is in scope — Corsair reads and writes are tenant-scoped.' };
+  }
 
   // Read through the ordinary read-only path. The fetch half of a sync is still
   // a read, and it should be as constrained as every other read PIE makes.

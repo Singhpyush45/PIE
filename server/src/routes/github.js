@@ -161,9 +161,15 @@ export function registerGithubRoutes(app) {
 
     const r = await corsair.syncGithub({ tenantId, login });
     if (!r.ok) {
+      // The recovery line has to match the reason. "Connect GitHub first" is
+      // useless advice when the server has no Corsair at all — the candidate
+      // can connect as often as they like and the sync will still refuse.
       return res.status(r.reason === 'NOT_CONFIGURED' ? 409 : 502).json({
-        error: r.detail || 'The sync could not run.', code: r.reason,
-        recovery: 'Connect GitHub first, or import repositories manually.',
+        error: r.detail || 'The sync could not run.',
+        code: r.reason,
+        recovery: r.reason === 'NOT_CONFIGURED'
+          ? 'Nothing to do here — this deployment gathers GitHub evidence without Corsair.'
+          : 'Connect GitHub first, or import repositories manually.',
       });
     }
     db.audit({ actorId: req.user.id, action: 'evidence.corsair_sync',

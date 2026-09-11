@@ -211,6 +211,28 @@ test('5d — every Corsair variable PIE reads is known to the env doctor', async
     `env-doctor.mjs does not know about ${unknown.join(', ')} — it will report them as typos`);
 });
 
+test('5e — a refusal always says why, and the advice matches the reason', async () => {
+  // On a deployment with no Corsair, pressing Sync answered "The sync could not
+  // run." — no reason — beside a recovery line telling the candidate to connect
+  // GitHub. Connecting would not have helped: the server has nowhere to sync
+  // INTO. Advice that cannot work is worse than no advice, because the person
+  // follows it and then distrusts the next thing the screen says.
+  await withEnv({}, async () => {
+    const r = await corsair.syncGithub({ tenantId: 'cand_x' });
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'NOT_CONFIGURED');
+    assert.ok(r.detail, 'a refusal with no detail leaves the caller nothing to show');
+    assert.match(r.detail, /not configured/i);
+  });
+
+  // And the tenant guard, which is a different refusal with a different cause.
+  await withEnv(FULL, async () => {
+    const r = await corsair.syncGithub({ tenantId: null });
+    assert.equal(r.reason, 'NO_TENANT');
+    assert.ok(r.detail);
+  });
+});
+
 test('6 — Corsair is never read without a tenant', async () => {
   await withEnv(FULL, async () => {
     const r = await corsair.githubRepositories('octocat', {});

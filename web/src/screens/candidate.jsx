@@ -725,6 +725,8 @@ function KnowledgeBaseCard({ ctx }) {
   }
 
   const count = synced?.count ?? 0;
+  // The server said Corsair is not configured, rather than "the read failed".
+  const unavailable = synced?.ok === false && synced?.reason === 'NOT_CONFIGURED';
 
   const EXAMPLES = [
     'which of these are JavaScript?',
@@ -754,6 +756,22 @@ function KnowledgeBaseCard({ ctx }) {
             below says why it matched.</p>
         </Alert>
 
+        {/* A button that cannot work is worse than no button.
+            On a deployment with no Corsair, pressing Sync answered "The sync
+            could not run." with no reason, beside a recovery line telling the
+            candidate to connect GitHub — which would not have helped, because
+            the server has nowhere to sync INTO. The Evidence Scout card above
+            already says this properly; this one now says it too. */}
+        {unavailable ? (
+          <Alert tone="info" title="Not available on this server" icon="lock">
+            <p className="t-12">
+              Corsair is not configured here, so there is no synced database to ask questions of.
+              PIE gathers GitHub evidence through its own import instead — use <b>Connect GitHub</b>
+              {' '}on the Evidence Scout card above, or add projects by hand.
+            </p>
+          </Alert>
+        ) : (
+        <>
         <div className="row row--wrap">
           <Button variant={count ? 'secondary' : 'primary'} icon="refresh" disabled={busy} onClick={sync}>
             {busy ? 'Working…' : count ? 'Re-sync from GitHub' : 'Sync my repositories'}
@@ -776,6 +794,8 @@ function KnowledgeBaseCard({ ctx }) {
               onClick={() => { setQuestion(x); ask(x); }}>{x}</Button>
           ))}
         </div>
+        </>
+        )}
 
         {result && (
           <>

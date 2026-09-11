@@ -1,7 +1,17 @@
 # Deploying PIE
 
-PIE is live at `https://pie-w5w3.onrender.com`. This document is what has to be true for that
-deployment to actually work — not a plan, a checklist against the current code.
+A Render instance exists at `https://pie-w5w3.onrender.com` and is **not currently working** —
+sign-in and the GitHub connect both fail there. The demo runs locally. This document is what has
+to be true for that deployment to actually work — not a plan, a checklist against the current code.
+
+**Known state, 11 September 2026.** The whole of `server/.env` was copied into Render's
+environment, which brought the localhost values with it: `APP_BASE_URL` and `GITHUB_CALLBACK_URL`
+still point at `localhost:5174`, so OAuth redirects off the live site and comes back as an expired
+link. `NODE_ENV` is not `production`, so the session cookie is not `Secure` and `CORSAIR_TUNNEL=1`
+made Render try to open the same tunnel as the developer's laptop — two apps registering the same
+delivery URL against one Corsair dev key, each overwriting the other. Supabase restore works
+(4215 rows). Fix the four variables in the table below before trusting anything on that host, and
+do not put the Corsair variables on it at all while a laptop is using the same key.
 
 Everything below has been implemented and tested. What remains is configuration, and the two
 sections marked **DO THIS** are the difference between a working deployment and one that looks

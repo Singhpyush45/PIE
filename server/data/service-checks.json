@@ -43,14 +43,24 @@
   },
   "supabase_hydrate": {
     "ok": true,
-    "detail": "Nothing to restore — ahvdxtujykurxnsnzwha.supabase.co holds no PIE rows this store does not already have.",
+    "detail": "Restored 104 row(s) from ahvdxtujykurxnsnzwha.supabase.co: 14 evidence, 1 githubConnections, 13 githubRepositories, 6 agentRuns, 6 matchResults, 1 assessmentAttempts, 3 proctoringEvents, 6 biasAudits, 54 auditEvents.",
     "config": "3fb4a031e597e007",
     "meta": {
-      "restored": {},
-      "skipped": 4146,
+      "restored": {
+        "evidence": 14,
+        "githubConnections": 1,
+        "githubRepositories": 13,
+        "agentRuns": 6,
+        "matchResults": 6,
+        "assessmentAttempts": 1,
+        "proctoringEvents": 3,
+        "biasAudits": 6,
+        "auditEvents": 54
+      },
+      "skipped": 4194,
       "failed": {}
     },
-    "at": "2026-09-11T08:05:02.934Z"
+    "at": "2026-09-11T09:37:04.128Z"
   },
   "corsair": {
     "ok": true,
@@ -73,7 +83,7 @@
     "detail": "A GitHub token was linked to a Corsair tenant for @Singhpyush45.",
     "config": "0c7e26f91fa7bbb6",
     "meta": null,
-    "at": "2026-09-11T04:34:11.220Z"
+    "at": "2026-09-11T08:54:40.274Z"
   },
   "corsair-sync": {
     "ok": true,
@@ -91,6 +101,6 @@
     "detail": "Corsair Hub issued a connect link.",
     "config": "0c7e26f91fa7bbb6",
     "meta": null,
-    "at": "2026-09-11T08:08:27.290Z"
+    "at": "2026-09-11T08:55:34.298Z"
   }
 }
