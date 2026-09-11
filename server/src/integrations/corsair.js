@@ -651,12 +651,34 @@ export async function syncGithub({ tenantId, login = null, limit = 50 } = {}) {
 }
 
 /** How much this candidate has synced, and when. Cheap enough to call on page load. */
+/**
+ * How many repositories this candidate can actually be asked about.
+ *
+ * Counted the same way the answers are counted, which was not true before.
+ * `repositories.count()` counts ROWS; the knowledge base dedupes by full name
+ * on read. With the duplicate rows an older sync left behind, the badge said
+ * "8 synced" while the answer beneath it said "4 of 4" — both correct, and
+ * together an invitation to ask which one is lying.
+ *
+ * A number on the same screen as the thing it counts has to agree with it.
+ */
 export async function syncStatus({ tenantId } = {}) {
   if (!isConfigured() || !tenantId) return { ok: false, reason: 'NOT_CONFIGURED', count: 0 };
-  const r = await attempt('github.db.repositories.count', () =>
-    sdk.asTenant(tenantId, t => t.github.db.repositories.count()));
+
+  const r = await attempt('github.db.repositories.list', () =>
+    sdk.asTenant(tenantId, t => t.github.db.repositories.list({ limit: 200 })));
   if (!r.ok) return { ...r, count: 0 };
-  return { ok: true, count: Number(r.data) || 0 };
+
+  const rows = (r.data || []).map(e => e?.data ?? e).filter(Boolean);
+  const unique = uniqueRepositories(rows);
+
+  return {
+    ok: true,
+    count: unique.length,
+    // Kept so the difference is visible to anyone debugging rather than
+    // silently smoothed over.
+    ...(rows.length !== unique.length ? { rows: rows.length } : {}),
+  };
 }
 
 /* -------------------------------------------------------------- linking */

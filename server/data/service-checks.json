@@ -43,24 +43,20 @@
   },
   "supabase_hydrate": {
     "ok": true,
-    "detail": "Restored 104 row(s) from ahvdxtujykurxnsnzwha.supabase.co: 14 evidence, 1 githubConnections, 13 githubRepositories, 6 agentRuns, 6 matchResults, 1 assessmentAttempts, 3 proctoringEvents, 6 biasAudits, 54 auditEvents.",
+    "detail": "Restored 18 row(s) from ahvdxtujykurxnsnzwha.supabase.co: 2 candidateProfiles, 1 githubConnections, 1 agentRuns, 1 matchResults, 13 auditEvents.",
     "config": "3fb4a031e597e007",
     "meta": {
       "restored": {
-        "evidence": 14,
+        "candidateProfiles": 2,
         "githubConnections": 1,
-        "githubRepositories": 13,
-        "agentRuns": 6,
-        "matchResults": 6,
-        "assessmentAttempts": 1,
-        "proctoringEvents": 3,
-        "biasAudits": 6,
-        "auditEvents": 54
+        "agentRuns": 1,
+        "matchResults": 1,
+        "auditEvents": 13
       },
-      "skipped": 4194,
+      "skipped": 4298,
       "failed": {}
     },
-    "at": "2026-09-11T09:37:04.128Z"
+    "at": "2026-09-11T10:05:42.205Z"
   },
   "corsair": {
     "ok": true,
@@ -87,14 +83,14 @@
   },
   "corsair-sync": {
     "ok": true,
-    "detail": "8 repositories examined, 8 with CI status.",
+    "detail": "4 repositories examined, 4 with CI status.",
     "config": "0c7e26f91fa7bbb6",
     "meta": {
-      "synced": 8,
-      "observed": 8,
-      "at": "2026-09-11T06:34:01.242Z"
+      "synced": 4,
+      "observed": 4,
+      "at": "2026-09-11T10:06:49.249Z"
     },
-    "at": "2026-09-11T06:34:01.245Z"
+    "at": "2026-09-11T10:06:49.250Z"
   },
   "corsair-hub": {
     "ok": true,
