@@ -1,5 +1,5 @@
 # PIE — Potential Intelligence Engine
-### Career Orchestrator · SAP Hackfest 2026 · Theme 2 — Inclusive Workforce
+### Career Orchestrator · Hack & Build 2026 — inclusive, evidence-first hiring
 
 **Potential over pedigree. AI recommends. Recruiters decide.**
 
@@ -52,19 +52,19 @@ On startup you get an honest banner:
 ```
 
 **The only line you probably need is `OPENAI_API_KEY=`.** Everything else can stay blank — an empty
-SAP block is the honest default, and the readiness screen reports ADAPTER_READY / FUTURE_INTEGRATION
+integrations block is the honest default, and the Integrations screen reports NOT_CONFIGURED
 rather than pretending. `server/.env` is git-ignored; never commit it or paste it into a chat.
 
 The file is grouped so you only read the part you need:
 
 | Section | Variables | Blank means |
 |---|---|---|
-| 1. AI provider | `SAP_AI_CORE_*`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `OLLAMA_BASE_URL`, `AI_TIMEOUT_MS` | deterministic engine + template narration |
+| 1. AI provider | `OPENAI_API_KEY`, `GEMINI_API_KEY`, `OLLAMA_BASE_URL`, `AI_TIMEOUT_MS` | deterministic engine + template narration |
 | 2. Accounts | `ADMIN_USERNAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `SESSION_TTL_HOURS`, `TOKEN_ENCRYPTION_KEY` | admin password generated once to the console; encryption key generated to `data/.token-key` |
 | 3. GitHub | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_CALLBACK_URL`, `GITHUB_TOKEN` | Connect GitHub offers labelled demo repositories |
 | 4. Supabase | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_MIRROR` | PIE persists to `server/data/pie.json` |
 | 5. Email (SMTP) | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, `RESET_TTL_MINUTES`, `APP_BASE_URL` | reset links are printed to the server console instead of emailed |
-| 6. SAP enterprise | `SAP_BTP_*`, `SAP_HANA_*`, `SF_*`, `SAC_*` | adapters report ADAPTER_READY / FUTURE_INTEGRATION |
+| 6. Corsair | `CORSAIR_API_KEY`, `CORSAIR_SIGNING_SECRET`, `CORSAIR_KEK`, `CORSAIR_DATABASE_URL` (all four, plus `supabase/004_corsair.sql`) | GitHub evidence falls back to PIE's own adapter |
 | 7. Server | `PORT`, `PIE_DATA_DIR`, `NODE_ENV` | port 5174, local data directory, development cookies |
 
 `server/.env.example` is the same file with the same comments, safe to commit.
@@ -222,7 +222,7 @@ structured JSON output — never one prompt pretending to be four.
 **Orchestrator services** (not agents) supply the rest: JD Requirement Extraction, Employer Readiness,
 Bias Audit, and the Human-in-the-Loop gate.
 
-> **Handbook mapping.** The pitch deck names four agents; the Hackfest handbook names six functions
+> **Agent mapping.** The pitch deck names four agents; the architecture names six functions
 > for Theme 2. PIE keeps the four agents and implements the remaining handbook functions as services
 > with identical rigour — manifests, scoped inputs, validation, audit. The mapping is rendered on the
 > **Orchestrator run** screen so a juror asking *"where are the six agents?"* gets the answer on
@@ -272,12 +272,12 @@ and a *Go* button that jumps to the right screen. Summary:
    "Tier-1 institution." "Digital native." The bias was never in Meera.
 9. **Inclusive Matching** — both scores shown, never blended; 19 attributes withheld and verified.
 10. **Switch to Meera** — her gap and pathway are hers regardless of any shortlist.
-11. **Learning pathway → SAP Learning Hub**, with the honest completion notice.
+11. **Learning pathway**, with the honest completion notice — PIE only claims to verify what it reassesses.
 12. **Assessment** — consent → device check → **isolated mode** (sidebar gone) → integrity warning
     *"1 of 5, here's what happened and what to do"*.
 13. **Reassess** — new evidence, orchestrator re-runs, match moves, a gap closes.
 14. **Bias Audit → Trust & Integrity review → Human decision → Audit trail.**
-15. **SAP integration readiness.**
+15. **Integrations.**
 
 **Closing line:** *"PIE didn't decide to hire Meera. It made her visible, told her exactly what to
 learn, told the employer their job description was the problem — and then got out of the way."*
@@ -308,21 +308,20 @@ At threshold the attempt is **submitted and locked for human review — never au
 
 ---
 
-## SAP integrations: what is real
+## Integrations: what is real
 
-Read live from each adapter on the **SAP integration readiness** screen.
+Read live from each adapter on the **Integrations** screen.
 
 | Service | State | Reality |
 |---|---|---|
-| **SAP Learning Hub, student edition** | `LINK_REDIRECTION_ACTIVE` | Real. Gap → objective → hand-off to learning.sap.com with the candidate's own SAP Universal ID. **No enrolment or completion API is claimed** — none has been verified. |
-| **SAP Generative AI Hub** | `CONNECTED` when configured, else `OFFLINE_TEMPLATE_MODE` | Adapter is wired and preferred over OpenAI. Activates the moment an SAP AI Core deployment URL and token exist. |
-| SAP BTP / CAP | `ADAPTER_READY` | Interface implemented (`fetchRequisitions`, `saveRun`); no subaccount provisioned. |
-| SAP HANA Cloud | `ADAPTER_READY` | Interface implemented; PIE's JSON store is the system of record today. |
-| SAP Analytics Cloud / BDC | `ANALYTICS_INTEGRATION_POINT` | Defined destination for cohort analytics; rendered in-app for now. |
-| SuccessFactors / Talent Intelligence Hub | `FUTURE_INTEGRATION` | Interface only. Requires an SF tenant and validated API scopes. |
+| **Corsair** | `CONNECTED` once a real call succeeds, else `NOT_CONFIGURED` | One shape for every third-party service: `db` for already-synced data, `api` for the live call. PIE reads GitHub evidence through it when configured. `CONFIGURED_UNVERIFIED` means a key is present and nothing has been proven — that is not the same as working, and the screen says so. |
+| **GitHub** | `OAUTH_CONFIGURED` / `DEMO_FIXTURES` | Repositories, languages and activity as **supporting** evidence. Three sources in order: Corsair's synced data, GitHub's own API, then labelled demo fixtures. PIE names the one it used. |
+| **Supabase** | `CONNECTED` when configured | Durable accounts, evidence and decisions. Without it, nothing survives a restart on a host with an ephemeral filesystem. |
+| **Email** | `VERIFIED` once a message is accepted | Verification codes and reset links, over SMTP or an HTTPS mail API. |
+| **LLM provider** | `LIVE` / `OFFLINE` | Narration only. Every score is identical with or without it. |
 
 Adapters live in `server/src/integrations/` and all expose `isConfigured()` + `status()`. **No
-SAP-specific logic sits in any UI component**, and no adapter fabricates a response.
+integration-specific logic sits in any UI component**, and no adapter fabricates a response.
 
 ---
 
@@ -331,7 +330,7 @@ SAP-specific logic sits in any UI component**, and no adapter fabricates a respo
 PIE uses the **first provider configured**, in this order:
 
 ```
-SAP Generative AI Hub → OpenAI → Google Gemini → Ollama (local) → deterministic templates
+OpenAI → Google Gemini → Ollama (local) → deterministic templates
 ```
 
 OpenAI, Gemini and Ollama all speak the same `/chat/completions` shape — Gemini through its
@@ -340,7 +339,6 @@ base URL, key and model, not three clients to keep in sync.
 
 | Provider | Configure with | Data leaves your machine |
 |---|---|---|
-| SAP Generative AI Hub | `SAP_AI_CORE_DEPLOYMENT_URL`, `SAP_AI_CORE_TOKEN` | yes |
 | OpenAI | `OPENAI_API_KEY` | yes |
 | Google Gemini | `GEMINI_API_KEY` | yes — and free-tier prompts may be used for training |
 | **Ollama (local)** | `OLLAMA_BASE_URL` | **no** |
@@ -355,7 +353,7 @@ Ollama is honest about its cost: a small local model is slower and weaker at str
 PIE validates every response and falls back to templates, so a bad answer costs the narration and
 nothing else. It is a deployment option, not a recommendation for a live stage demo.
 
-The **Which model writes the words** panel on the SAP integration readiness screen renders this
+The **Which model writes the words** panel on the Integrations screen renders this
 chain live — each row is the adapter's own state, including whether that provider sends data off
 the machine.
 
@@ -365,11 +363,11 @@ the machine.
 
 - The key is **server-side only** (`OPENAI_API_KEY`), read in `server/src/ai/provider.js`. It is never
   sent to the browser, never in Vite env vars, never in `web/`.
-- Provider order: **SAP Generative AI Hub → OpenAI → Gemini → Ollama → offline templates.**
+- Provider order: **OpenAI → Gemini → Ollama → offline templates.**
 - A **circuit breaker** stops retrying after 3 failures for 60s, so a dead key cannot add latency to
   every request mid-demo.
 - Any failure — unavailable, rate-limited, misconfigured, malformed JSON — falls back to deterministic
-  output. The sidebar and SAP screen show the live mode (`LIVE` / `DEGRADED` / `OFFLINE`).
+  output. The sidebar and Integrations screen show the live mode (`LIVE` / `DEGRADED` / `OFFLINE`).
 
 **With no key configured, every score, gap, ranking and audit signal is identical.**
 
@@ -405,7 +403,7 @@ What the policies enforce, at the database rather than in the UI:
 The driver is `server/src/persistence/supabase.js` — plain PostgREST over `fetch`, no client library.
 It activates when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set; until then PIE says
 `NOT_CONFIGURED` and names the JSON store as the system of record instead of implying a connection.
-Sign in as the administrator and use **SAP integration readiness → Where PIE's data lives → Verify
+Sign in as the administrator and use **Integrations → Where PIE's data lives → Verify
 connection** for a live reachability and schema check. Full instructions: `server/supabase/README.md`.
 
 The `service_role` key bypasses RLS and belongs in `server/.env` only. It is never sent to the
@@ -476,7 +474,7 @@ browser, never logged, and never returned by any endpoint.
 | 8 | Recruiter isolation | PASS |
 | 9 | Candidate isolation | PASS |
 | 10 | AI failure falls back without breaking the run | PASS |
-| 11 | SAP adapters never claim unavailable connectivity | PASS |
+| 11 | Integrations never claim connectivity they lack | PASS |
 | 12 | Bias signals are indicators, never proof; audit is read-only | PASS |
 | 13 | Reassessment produces new evidence and improves the match | PASS |
 | 14 | Selective invocation runs only the needed pipeline | PASS |
@@ -548,7 +546,7 @@ server/src/
   orchestrator.js       control plane: manifests, triggers, scoped payloads, validation, audit
   assessment.js         policy, question bank, JIT delivery, state machine, warning engine
   sanitize.js           input sanitisation
-  ai/provider.js        SAP GenAI Hub -> OpenAI -> templates, with a circuit breaker
+  ai/provider.js        OpenAI -> Gemini -> Ollama -> templates, with a circuit breaker
   ai/agents.js          the four agents' isolated prompts + structured outputs
   integrations/         sapGenAiHub · sapLearningHub · sapBtpCap · sapHanaRepository ·
                         successFactors · sapAnalytics · githubEvidenceAdapter · githubOAuth
@@ -584,12 +582,13 @@ adminwalk.mjs           Trust & Integrity walk
    A stray invalid `GITHUB_TOKEN` in the shell environment is detected by shape and reported as
    `MISCONFIGURED` rather than being treated as a live connection.
 5. **Supabase ships as schema + driver, not as a running database.** The schema is validated but PIE
-   persists to the JSON store until you supply the two environment variables. The readiness screen
+   persists to the JSON store until you supply the two environment variables. The Integrations screen
    states which one is the system of record.
 6. **Password recovery is not implemented.** There is no email flow; the UI says "coming soon" rather
    than offering a button that does nothing.
-7. **SAP BTP/CAP, HANA, SuccessFactors and SAC are adapters, not integrations.** Do not claim
-   otherwise on stage; the readiness screen is deliberately worded for exactly this question.
+7. **A configured integration is not a working one.** `CONFIGURED_UNVERIFIED` means credentials
+   exist and no call has been made. Only a real round trip promotes an adapter to `CONNECTED`, and
+   the Integrations screen is deliberately worded for exactly this question.
 8. **PIE never makes a hiring decision.** It analyses, recommends, explains and flags. Every decision
    with authority is recorded against a named human and a written reason.
 

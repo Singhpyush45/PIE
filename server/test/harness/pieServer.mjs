@@ -128,7 +128,9 @@ export async function startPie({ name, env: extra = {} } = {}) {
         // A real key or URL in the developer's own server/.env must not be read
         // — still less written to — by a test run.
         OPENAI_API_KEY: '', GEMINI_API_KEY: '',
-        SAP_AI_CORE_DEPLOYMENT_URL: '', SAP_AI_CORE_TOKEN: '',
+        CORSAIR_API_KEY: '', CORSAIR_SIGNING_SECRET: '', CORSAIR_KEK: '',
+        CORSAIR_DATABASE_URL: '', DATABASE_URL: '',
+        GMAIL_CLIENT_ID: '', GMAIL_CLIENT_SECRET: '', GMAIL_REDIRECT_URL: '',
         SUPABASE_URL: '', SUPABASE_SERVICE_ROLE_KEY: '',
         GITHUB_TOKEN: '', GITHUB_CLIENT_ID: '', GITHUB_CLIENT_SECRET: '',
         MAIL_HTTP_PROVIDER: '', RESEND_API_KEY: '', BREVO_API_KEY: '', MAIL_FROM: '',
@@ -208,27 +210,32 @@ export async function startPie({ name, env: extra = {} } = {}) {
 /**
  * Face descriptors for tests, without needing a camera or a real face.
  *
- * The model produces 128 numbers of roughly unit length, where the same person
- * lands close together and two people land far apart. That geometry is all the
- * server's comparison depends on, so it can be reproduced exactly: a random unit
- * vector is "a person", the same vector with a little noise is "the same person
- * on a different day", and a second random vector is "somebody else" — two
- * random unit vectors in 128 dimensions sit about 1.41 apart, comfortably beyond
- * any sane threshold.
+ * These MUST match the real model's geometry, and the first version of this did
+ * not. It produced unit vectors, because that is what a descriptor "obviously"
+ * is. The real model emits no normalisation at all — a genuine descriptor
+ * measures about 1.39 — so every identity test passed against synthetic data
+ * that satisfied an invariant the product violated, and the mismatch only
+ * surfaced when a person stood in front of a camera.
+ *
+ * So the scale here is the measured one. `test/fixtures/descriptors.json` holds
+ * four real descriptors from the real model if you want the genuine article;
+ * these generators are for the cases that need many distinct people.
  */
+const REAL_NORM = 1.39;
+
 export function personDescriptor(seed = Math.random()) {
   let x = Math.sin(seed * 99991) * 10000;
   const rnd = () => { x = Math.sin(x) * 10000; return x - Math.floor(x) - 0.5; };
   const v = Array.from({ length: 128 }, rnd);
   const n = Math.sqrt(v.reduce((a, b) => a + b * b, 0));
-  return v.map(k => k / n);
+  return v.map(k => (k / n) * REAL_NORM);
 }
 
 /** The same person, captured again. `spread` controls how different the day was. */
 export function sameFace(descriptor, spread = 0.02, seed = Math.random()) {
   let x = Math.sin(seed * 7717) * 10000;
   const rnd = () => { x = Math.sin(x) * 10000; return x - Math.floor(x) - 0.5; };
-  const v = descriptor.map(k => k + rnd() * spread);
-  const n = Math.sqrt(v.reduce((a, b) => a + b * b, 0));
-  return v.map(k => k / n);
+  // Perturb without re-scaling: a real second capture of the same face is a
+  // nearby point in the same space, not a point on some sphere.
+  return descriptor.map(k => k + rnd() * spread);
 }

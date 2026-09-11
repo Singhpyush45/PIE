@@ -4,7 +4,7 @@
 // derivable from the browser. The frontend calls PIE endpoints; PIE calls the provider.
 //
 // Provider order:
-//   SAP Generative AI Hub → OpenAI → Gemini → Ollama (local) → deterministic templates
+//   OpenAI → Gemini → Ollama (local) → deterministic templates
 //
 // The first CONFIGURED provider wins; the rest are documented alternatives, not
 // silent fallbacks mid-request. A provider failure NEVER breaks a request —
@@ -16,23 +16,11 @@
 //   one code path with a different base URL, key and model — not three clients to
 //   keep in sync.
 
-import * as sapGenAi from '../integrations/sapGenAiHub.js';
-
 const env = (k, d = '') => (process.env[k] || d).trim();
 
 /* ------------------------------------------------------------------ registry */
 // Order matters: the first one that is configured is the one PIE uses.
 const REGISTRY = [
-  {
-    key: 'sap_genai_hub',
-    name: 'SAP Generative AI Hub',
-    kind: 'sap',
-    isConfigured: () => sapGenAi.isConfigured(),
-    model: () => env('SAP_AI_CORE_MODEL', 'deployment default'),
-    note: 'Agent narration and interpretation via SAP Generative AI Hub. All scores remain deterministic.',
-    requires: 'SAP_AI_CORE_DEPLOYMENT_URL, SAP_AI_CORE_TOKEN',
-    dataLeavesMachine: true,
-  },
   {
     key: 'openai',
     name: 'OpenAI',
@@ -104,11 +92,37 @@ function noteSuccess() { breaker.failures = 0; breaker.openUntil = 0; }
  * configured — a preference is not a promise.
  */
 export function activeProvider(prefer) {
-  if (prefer) {
-    const p = REGISTRY.find(x => x.key === prefer && x.isConfigured());
-    if (p) return p;
+  return providerChain(prefer)[0] || null;
+}
+
+/**
+ * Every configured provider, best first.
+ *
+ * PIE used to answer this question with `REGISTRY.find(isConfigured)` — the
+ * first provider in the file that had a key. That is fine until someone has two
+ * keys and the first one is dead, which is not a corner case: a free trial runs
+ * out, a key gets rotated, a quota resets monthly. With two working keys in the
+ * environment, one exhausted OpenAI account switched off narration everywhere in
+ * PIE, and because every agent falls back to templates it did so silently. The
+ * Evidence Scout was the first component honest enough to complain.
+ *
+ * So: an ORDER, not a winner. `complete()` walks it, and one provider being out
+ * of credit costs a retry rather than the feature.
+ *
+ * Priority: an explicit `prefer` for this one call, then AI_PROVIDER from the
+ * environment, then registry order. A preference is still not a promise — an
+ * unconfigured favourite is skipped rather than honoured into a failure.
+ */
+export function providerChain(prefer) {
+  const configured = REGISTRY.filter(p => p.isConfigured());
+  const wanted = [prefer, (process.env.AI_PROVIDER || '').trim().toLowerCase()].filter(Boolean);
+
+  const front = [];
+  for (const key of wanted) {
+    const hit = configured.find(p => p.key === key && !front.includes(p));
+    if (hit) front.push(hit);
   }
-  return REGISTRY.find(p => p.isConfigured()) || null;
+  return [...front, ...configured.filter(p => !front.includes(p))];
 }
 
 export function providerStatus(prefer) {
@@ -169,10 +183,6 @@ async function callRaw(messages, { maxTokens, temperature, json, prefer }) {
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(), timeout);
   try {
-    if (p.kind === 'sap') {
-      return await sapGenAi.chat(messages, { maxTokens, temperature, signal: ac.signal });
-    }
-
     const res = await fetch(`${p.base().replace(/\/+$/, '')}/chat/completions`, {
       method: 'POST', signal: ac.signal,
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p.apiKey()}` },
@@ -195,26 +205,76 @@ async function callRaw(messages, { maxTokens, temperature, json, prefer }) {
 }
 
 /**
+ * Runs `fn`, and gives a rate limit one second chance.
+ *
+ * Free tiers meter by the minute as well as by the day, and an agent is exactly
+ * the shape that trips the per-minute one: it makes its calls in a burst, a few
+ * hundred milliseconds apart. The quota is not exhausted in any meaningful
+ * sense — it is simply being asked too quickly — and one short pause turns a
+ * failed run into a successful one.
+ *
+ * Only once, and only for 429. A daily quota will not clear in three seconds,
+ * and retrying a real error is just a slower way to fail.
+ */
+async function withRateLimitRetry(fn) {
+  try { return await fn(); }
+  catch (e) {
+    if (!/\b429\b|rate.?limit|quota/i.test(String(e.message || ''))) throw e;
+    await new Promise(r => setTimeout(r, 3000));
+    return fn();
+  }
+}
+
+/**
  * Ask the configured provider for text.
  * Returns { ok, text, provider, mode, error } — never throws.
  */
 export async function complete(messages, opts = {}) {
-  const st = providerStatus(opts.prefer);
-  if (!st.enabled) return { ok: false, text: null, ...st, error: 'no provider configured' };
-  if (breakerOpen()) return { ok: false, text: null, ...st, mode: 'DEGRADED', error: 'provider circuit open after repeated failures' };
-  try {
-    const text = await callRaw(messages, {
-      maxTokens: opts.maxTokens ?? 700,
-      temperature: opts.temperature ?? 0.2,
-      json: Boolean(opts.json),
-      prefer: opts.prefer,
-    });
-    noteSuccess();
-    return { ok: true, text, provider: st.provider, mode: 'LIVE' };
-  } catch (e) {
-    noteFailure();
-    return { ok: false, text: null, provider: st.provider, mode: 'FALLBACK', error: e.message };
+  const chain = providerChain(opts.prefer);
+  if (!chain.length) {
+    return { ok: false, text: null, ...providerStatus(opts.prefer), error: 'no provider configured' };
   }
+  if (breakerOpen()) {
+    return { ok: false, text: null, ...providerStatus(opts.prefer),
+      mode: 'DEGRADED', error: 'provider circuit open after repeated failures' };
+  }
+
+  const failures = [];
+  for (const p of chain) {
+    try {
+      const text = await withRateLimitRetry(() => callRaw(messages, {
+        maxTokens: opts.maxTokens ?? 700,
+        temperature: opts.temperature ?? 0.2,
+        json: Boolean(opts.json),
+        prefer: p.key,
+      }));
+      noteSuccess();
+      return {
+        ok: true, text, provider: p.name, providerKey: p.key, mode: 'LIVE',
+        // Named when it is not the one PIE would normally have used, so a
+        // fail-over is visible rather than inferred from a change of tone.
+        ...(p.key === chain[0].key ? {} : { failedOver: true, skipped: failures.map(f => f.provider) }),
+      };
+    } catch (e) {
+      // A provider that answered with an error has had its turn. Recorded and
+      // stepped past, rather than ending the attempt: the next key in the
+      // environment is right there, and trying it costs one request.
+      failures.push({ provider: p.name, error: String(e.message || e).slice(0, 200) });
+    }
+  }
+
+  // Only now is this a real failure: every configured provider was asked.
+  noteFailure();
+  const first = failures[0];
+  return {
+    ok: false, text: null,
+    provider: first?.provider || chain[0].name,
+    mode: 'FALLBACK',
+    error: failures.length > 1
+      ? failures.map(f => `${f.provider}: ${f.error}`).join(' | ')
+      : (first?.error || 'the provider did not answer'),
+    triedProviders: failures.map(f => f.provider),
+  };
 }
 
 /**
@@ -222,14 +282,52 @@ export async function complete(messages, opts = {}) {
  * A malformed response is treated as a failure, not as data.
  */
 export async function completeJson(messages, opts = {}) {
-  const r = await complete(messages, { ...opts, json: true });
-  if (!r.ok || !r.text) return { ...r, data: null };
-  try {
-    const cleaned = r.text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
-    return { ...r, data: JSON.parse(cleaned) };
-  } catch (e) {
-    noteFailure();
-    return { ...r, ok: false, data: null, mode: 'FALLBACK', error: `unparseable JSON: ${e.message}` };
+  const parse = text => {
+    const cleaned = String(text).replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
+    return JSON.parse(cleaned);
+  };
+
+  /**
+   * Did this reply stop mid-sentence rather than come back malformed?
+   *
+   * The two are different failures and only one is worth retrying. Valid JSON
+   * ends with a closing brace or bracket; a reply that ends anywhere else ran
+   * out of room. Gemini 2.5 and the OpenAI reasoning models spend part of the
+   * output budget thinking before they emit a character, so a budget that is
+   * comfortable for prose can leave a JSON object with its last string unclosed
+   * — which is exactly what "Unterminated string in JSON at position 24" is.
+   */
+  const truncated = text => {
+    const t = String(text || '').trim();
+    return t.length > 0 && !/[}\]]$/.test(t);
+  };
+
+  const first = await complete(messages, { ...opts, json: true });
+  if (!first.ok || !first.text) return { ...first, data: null };
+
+  try { return { ...first, data: parse(first.text) }; }
+  catch (e) {
+    if (!truncated(first.text)) {
+      // Genuinely malformed. Retrying would ask the same question of the same
+      // model and get the same answer, slower.
+      noteFailure();
+      return { ...first, ok: false, data: null, mode: 'FALLBACK', error: `unparseable JSON: ${e.message}` };
+    }
+
+    // Cut short. Ask once more with room to finish.
+    const roomier = Math.max(1200, (opts.maxTokens ?? 700) * 4);
+    const second = await complete(messages, { ...opts, json: true, maxTokens: roomier });
+    if (!second.ok || !second.text) {
+      noteFailure();
+      return { ...second, data: null, error: second.error || 'the retry did not answer' };
+    }
+    try {
+      return { ...second, data: parse(second.text), retriedForLength: true };
+    } catch (e2) {
+      noteFailure();
+      return { ...second, ok: false, data: null, mode: 'FALLBACK',
+        error: `unparseable JSON after a retry with ${roomier} tokens: ${e2.message}` };
+    }
   }
 }
 

@@ -11,6 +11,8 @@
 // HONESTY BOUNDARY: repository activity is SUPPORTING evidence. It does not prove
 // skill, and this adapter never says it does.
 
+import * as corsair from './corsair.js';
+
 const cfg = () => ({
   token: process.env.GITHUB_TOKEN || '',
   api: process.env.GITHUB_API_URL || 'https://api.github.com',
@@ -108,9 +110,42 @@ const GENERIC = [
 ];
 
 /* ----------------------------------------------------------------- fetching */
-export async function fetchRepositories(username, { limit = 8 } = {}) {
+/**
+ * A candidate's repositories, from the best source available.
+ *
+ * Three sources, in order, and PIE always says which one it used:
+ *   1. Corsair, when configured — synced data, so this is a read rather than a
+ *      fan-out of live calls against a rate limit.
+ *   2. GitHub's own API, with PIE's token.
+ *   3. Labelled demo data, so a talk on a bad conference network still works.
+ *
+ * Corsair is preferred but never required. If it is unconfigured, refuses, or
+ * simply returns nothing for this user, the next source takes over silently —
+ * because a two-day-old integration must not be able to break evidence import
+ * on the morning of a demo.
+ */
+export async function fetchRepositories(username, { limit = 8, tenantId = null } = {}) {
   const clean = String(username || '').trim().replace(/^@/, '').toLowerCase();
   if (!clean) throw new Error('A GitHub username is required.');
+
+  // Corsair reads are tenant-scoped: one candidate's stored authorisation can
+  // never be used while acting for another. No tenant means no Corsair read,
+  // rather than a read against some ambient default.
+  if (tenantId && corsair.isConfigured()) {
+    const r = await corsair.githubRepositories(clean, { tenantId });
+    if (r.ok && r.repositories.length) {
+      const synced = r.source === 'corsair-db';
+      return {
+        mode: 'CORSAIR', username: clean, repositories: r.repositories.slice(0, limit),
+        notice: synced
+          ? `Read from Corsair's synced GitHub data for ${clean} — a local query, so no live API call and no rate limit.`
+          : `Fetched live through Corsair for ${clean}, using the authorisation ${clean} granted. Nothing was synced yet.`,
+        source: r.source,
+      };
+    }
+    // Anything else — not configured for this plugin, no synced rows yet, a
+    // refusal — falls through. The candidate gets their evidence either way.
+  }
 
   if (!isConfigured()) {
     const repos = DEMO_REPOS[clean] || GENERIC;

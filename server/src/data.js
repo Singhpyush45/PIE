@@ -27,18 +27,13 @@ export const ONTOLOGY = [
 export const SKILL_BY_ID = Object.fromEntries(ONTOLOGY.map(s => [s.id, s]));
 
 /* --------------------------------------------------- LEARNING RESOURCE REGISTRY */
-// LearningResource abstraction: PIE is not hard-coded to SAP. SAP is a first-class,
-// VERIFIED provider. No SAP Learning Hub API is claimed — routing is link-based.
+// PIE is not tied to any one learning vendor, and it is careful about what it
+// claims for each. The distinction that matters is COMPLETION VERIFICATION:
+// PIE can prove a practice task was done, because it reassesses the candidate
+// afterwards and new evidence appears. It cannot prove anyone finished a course
+// on someone else's platform, so it does not pretend to — those resources are
+// links, and their completion is candidate-declared at the lowest trust tier.
 export const LEARNING_PROVIDERS = {
-  SAP_LEARNING_HUB: {
-    id: 'SAP_LEARNING_HUB',
-    name: 'SAP Learning Hub, student edition',
-    source: 'Official SAP',
-    verification_status: 'Verified',
-    completion_verification: 'NOT_AVAILABLE',
-    base_url: 'https://learning.sap.com/free-student-edition',
-    note: 'Link/resource-redirection integration. PIE does not own or control the candidate’s SAP Universal ID or Learning Hub account, and does not claim automated enrolment or completion data.',
-  },
   PIE_PRACTICE: {
     id: 'PIE_PRACTICE',
     name: 'PIE Practice Task',
@@ -60,48 +55,31 @@ export const LEARNING_PROVIDERS = {
 };
 
 export const LEARNING_RESOURCES = [
-  {
-    resource_id: 'SAP-BTP-CAP-01', provider: 'SAP_LEARNING_HUB', skill: 'cloud',
-    title: 'Develop extensions with CAP following the SAP BTP Developer’s Guide',
-    difficulty: 'Intermediate', learning_type: 'Hands-on practice system', hours: 12,
-    description: 'Hands-on SAP BTP practice: build CAP-based service extensions on Cloud Foundry.',
-    external_url: 'https://learning.sap.com/free-student-edition', availability: 'Student edition',
-  },
-  {
-    resource_id: 'SAP-HANA-01', provider: 'SAP_LEARNING_HUB', skill: 'sql',
-    title: 'SAP HANA Cloud — Modeling & Provisioning Data',
-    difficulty: 'Intermediate', learning_type: 'Hands-on practice system', hours: 10,
-    description: 'Data modelling and provisioning on SAP HANA Cloud; strengthens applied SQL and data modelling.',
-    external_url: 'https://learning.sap.com/free-student-edition', availability: 'Student edition',
-  },
-  {
-    resource_id: 'SAP-GENAI-01', provider: 'SAP_LEARNING_HUB', skill: 'python',
-    title: 'Solve business problems using prompts and LLMs in SAP Generative AI Hub',
-    difficulty: 'Intermediate', learning_type: 'Hands-on practice system', hours: 8,
-    description: 'Applied prompting and LLM orchestration in SAP Generative AI Hub, using Python-based tooling.',
-    external_url: 'https://learning.sap.com/free-student-edition', availability: 'Student edition',
-  },
-  {
-    resource_id: 'SAP-SAC-01', provider: 'SAP_LEARNING_HUB', skill: 'dataanalysis',
-    title: 'Exploring SAP Analytics Cloud — Modeling, Data Transformation & Story Design',
-    difficulty: 'Beginner', learning_type: 'Hands-on practice system', hours: 9,
-    description: 'Build models, transform data and design analytical stories in SAP Analytics Cloud.',
-    external_url: 'https://learning.sap.com/free-student-edition', availability: 'Student edition',
-  },
-  {
-    resource_id: 'SAP-BDC-01', provider: 'SAP_LEARNING_HUB', skill: 'dataquality',
-    title: 'AI-powered Visualizations and Augmented Analytics on Business Data (SAP BDC)',
-    difficulty: 'Intermediate', learning_type: 'Hands-on practice system', hours: 7,
-    description: 'Augmented analytics over business data; applied data-quality and validation thinking.',
-    external_url: 'https://learning.sap.com/free-student-edition', availability: 'Student edition',
-  },
-  {
-    resource_id: 'SAP-BUILD-01', provider: 'SAP_LEARNING_HUB', skill: 'cicd',
-    title: 'SAP Build & SAP Business Application Studio — Sandbox',
-    difficulty: 'Beginner', learning_type: 'Hands-on practice system', hours: 6,
-    description: 'Application lifecycle and deployment workflow in SAP Build / Business Application Studio.',
-    external_url: 'https://learning.sap.com/free-student-edition', availability: 'Student edition',
-  },
+  { resource_id: 'PIE-PR-CLOUD', provider: 'PIE_PRACTICE', skill: 'cloud',
+    title: 'Deploy a service and prove it stays up', difficulty: 'Intermediate',
+    learning_type: 'Practice project', hours: 10,
+    description: 'Take an existing service, deploy it to a free host, add a health endpoint and a restart check, and show it survives a redeploy. Reassessed by PIE.',
+    external_url: null, availability: 'Always' },
+  { resource_id: 'PIE-PR-SQL', provider: 'PIE_PRACTICE', skill: 'sql',
+    title: 'Model a real schema and query it under load', difficulty: 'Intermediate',
+    learning_type: 'Practice project', hours: 9,
+    description: 'Design a normalised schema for a real dataset, write the ten queries a product would actually need, and show which ones needed an index. Reassessed by PIE.',
+    external_url: null, availability: 'Always' },
+  { resource_id: 'PIE-PR-PY', provider: 'PIE_PRACTICE', skill: 'python',
+    title: 'Build a small tool end to end in Python', difficulty: 'Beginner',
+    learning_type: 'Practice task', hours: 8,
+    description: 'A command-line tool with arguments, error handling and tests. Small, finished, and yours. Reassessed by PIE.',
+    external_url: null, availability: 'Always' },
+  { resource_id: 'OPEN-DA-01', provider: 'OPEN_WEB', skill: 'dataanalysis',
+    title: 'Exploratory data analysis on a public dataset', difficulty: 'Beginner',
+    learning_type: 'Course', hours: 9,
+    description: 'Work through a full analysis: load, clean, describe, visualise, and write up what the data does and does not support.',
+    external_url: 'https://www.kaggle.com/learn/data-visualization', availability: 'Free' },
+  { resource_id: 'OPEN-CS-01', provider: 'OPEN_WEB', skill: 'dataquality',
+    title: 'Data cleaning, from messy input to something trustworthy', difficulty: 'Intermediate',
+    learning_type: 'Course', hours: 7,
+    description: 'Missing values, inconsistent formats, duplicates and the judgement calls each one needs.',
+    external_url: 'https://www.kaggle.com/learn/data-cleaning', availability: 'Free' },
   { resource_id: 'PIE-PR-DOCKER', provider: 'PIE_PRACTICE', skill: 'docker',
     title: 'Containerise your existing test suite', difficulty: 'Beginner',
     learning_type: 'Practice task', hours: 4,

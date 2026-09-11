@@ -31,7 +31,7 @@ export const api = {
   /* --- platform --- */
   health: () => req('/health'),
   services: () => req('/services'),
-  sapLandscape: () => req('/sap/landscape'),
+  integrationLandscape: () => req('/integrations/landscape'),
   aiProviders: () => req('/ai/providers'),
   // Live Supabase reachability + schema check. Administrator only — it names the host.
   supabaseCheck: () => req('/system/supabase?force=1'),
@@ -80,6 +80,13 @@ export const api = {
     req(`/github/repositories${username ? `?username=${encodeURIComponent(username)}` : ''}`),
   githubImport: body => req('/github/import', { method: 'POST', body }),
   githubDisconnect: body => req('/github/disconnect', { method: 'POST', body: body || {} }),
+
+  // Corsair — a second, optional way to connect, and the Evidence Scout that
+  // runs across whatever the candidate has authorised.
+  corsairStatus: () => req('/github/corsair'),
+  corsairConnect: plugin => req('/github/corsair/connect', { method: 'POST', body: { plugin } }),
+  corsairDisconnect: plugin => req('/github/corsair/disconnect', { method: 'POST', body: { plugin } }),
+  corsairScout: body => req('/github/corsair/scout', { method: 'POST', body: body || {} }),
   jobs: () => req('/candidate/jobs'),
   applications: () => req('/candidate/applications'),
   apply: requisitionId => req('/candidate/applications', { method: 'POST', body: { requisitionId } }),

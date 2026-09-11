@@ -1,5 +1,5 @@
-// PIE — the six Hackfest Theme 2 agents + the cross-cutting Explainability service.
-// Every agent is deterministic and evidence-grounded. The LLM (SAP Generative AI Hub,
+// PIE — the six specialist agents + the cross-cutting Explainability service.
+// Every agent is deterministic and evidence-grounded. The LLM (OpenAI, Gemini,
 // when configured) only *narrates* what these functions have already computed — it never
 // produces a score. That is what makes the demo safe to run with no network.
 
@@ -383,7 +383,7 @@ export function learningPathwayAgent(gaps, discovery) {
         verification_status: LEARNING_PROVIDERS[r.provider].verification_status,
         completion_verification: LEARNING_PROVIDERS[r.provider].completion_verification,
         completionNotice: LEARNING_PROVIDERS[r.provider].completion_verification === 'NOT_AVAILABLE'
-          ? 'External learning resource — completion verification requires supported SAP integration or candidate-provided evidence.'
+          ? 'External learning resource — completion cannot be verified by PIE; it rests on candidate-provided evidence.'
           : LEARNING_PROVIDERS[r.provider].completion_verification === 'PIE_REASSESSMENT'
             ? 'Completion is verified by PIE reassessment and produces new skill evidence.'
             : 'Candidate-declared completion only; recorded at the lowest evidence trust tier.',
@@ -400,9 +400,10 @@ export function learningPathwayAgent(gaps, discovery) {
     agent: 'Learning Pathway Agent', modelVersion: MODEL_VERSION,
     objectives,
     totalHours: objectives.reduce((a, o) => a + o.estimatedHours, 0),
-    sapResourceCount: objectives.reduce((a, o) => a + o.resources.filter(r => r.provider === 'SAP_LEARNING_HUB').length, 0),
+    // How much of the pathway PIE can actually verify, as opposed to link out to.
+    verifiedResourceCount: objectives.reduce((a, o) => a + o.resources.filter(r => r.provider === 'PIE_PRACTICE').length, 0),
     integrationModel: 'LINK_REDIRECTION',
-    integrationNotice: 'PIE routes the candidate to SAP Learning Hub, student edition. PIE does not own or control the candidate’s SAP Universal ID or Learning Hub account, and claims no automated enrolment or completion API.',
+    integrationNotice: 'PIE routes the candidate to external learning resources by link. It does not own their account with any provider and claims no automated enrolment or completion API. Only a PIE practice task ends in a reassessment, which is the one completion PIE can actually verify.',
   };
 }
 

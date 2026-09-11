@@ -4,25 +4,27 @@ node_modules/
 server/.env
 web/.env
 *.log
+
+# The Corsair dev tunnel binary, if it was copied here to get around an
+# antivirus that will not run it from the user profile. 16MB, and not ours.
+frpc
+frpc.exe
 shots/
 server/data/pie.json
 
-# Runtime verification records. Machine-specific: they say that THIS deployment
-# proved its SMTP/Supabase/HANA/AI Core connection, so committing them would
-# make one machine's successful check appear as another machine's.
-server/data/service-checks.json
+# Backups made by tools/env-fix.mjs. A backup of a .env is a .env: it holds the
+# same keys, and ".env" as a pattern matches only that exact name. Without these
+# lines the tidy-up script would quietly create committable copies of every
+# secret it was written to protect.
+.env.backup-*
+server/.env.backup-*
+web/.env.backup-*
 
-# Local/runtime secrets
+# The generated token-encryption key, when TOKEN_ENCRYPTION_KEY is not set.
+# DEPLOYMENT.md has always said this file is ignored; until now it was not.
 server/data/.token-key
 
-# Claude/local AI workspace
-.claude/
-
-# Local screenshots and generated debug artifacts
-web/.shot-*.png
-web/__*.mjs
-web/__*.png
-web/__*.json
-web/__*.svg
-web/__*.bin
-web/__*.raw
+# Runtime verification records. Machine-specific: they say that THIS deployment
+# proved its Supabase, mail and Corsair connections, so committing them would
+# make one machine's successful check appear as another machine's.
+server/data/service-checks.json

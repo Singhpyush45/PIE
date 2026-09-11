@@ -504,6 +504,7 @@ function ImportView({ ctx }) {
       <Tabs value={tab} onChange={setTab} items={[
         { key: 'resume', label: 'Resume', icon: 'file' },
         { key: 'github', label: 'GitHub', icon: 'github' },
+        { key: 'scout', label: 'Evidence Scout', icon: 'plug' },
         { key: 'project', label: 'Project', icon: 'layers' },
         { key: 'certificate', label: 'Certificate', icon: 'award' },
         { key: 'hackathon', label: 'Hackathon', icon: 'trophy' },
@@ -511,11 +512,157 @@ function ImportView({ ctx }) {
       ]} />
       {tab === 'resume' && <ResumeImport ctx={ctx} />}
       {tab === 'github' && <GithubImport ctx={ctx} />}
+      {tab === 'scout' && <EvidenceScoutCard ctx={ctx} />}
       {tab === 'project' && <ProjectImport ctx={ctx} />}
       {tab === 'certificate' && <CertificateImport ctx={ctx} />}
       {tab === 'hackathon' && <HackathonImport ctx={ctx} />}
       {tab === 'other' && <OtherImport ctx={ctx} />}
     </div>
+  );
+}
+
+/**
+ * The Evidence Scout — an agent that decides what to look at.
+ *
+ * The point of this screen is not the result; it is the LOG. An agent that
+ * reaches into somebody's repositories and inbox has to be inspectable by the
+ * person whose accounts they are, so every call is shown with the reason it was
+ * made and the arguments PIE actually sent — including the ones PIE narrowed.
+ * A refused call is shown too, in the same list. Hiding refusals would make the
+ * agent look better and the product less trustworthy.
+ */
+function EvidenceScoutCard({ ctx }) {
+  const [status, setStatus] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [run, setRun] = useState(null);
+  const [login, setLogin] = useState('');
+
+  const load = useCallback(async () => {
+    try { setStatus(await api.corsairStatus()); }
+    catch (e) { ctx.notify('warn', e.message); setStatus({ available: false }); }
+  }, [ctx]);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function connect(plugin) {
+    setBusy(true);
+    try {
+      const r = await api.corsairConnect(plugin);
+      // Corsair Hub runs the handshake on its own page. Opening it rather than
+      // embedding it is deliberate: a consent screen inside someone else's
+      // iframe is exactly the shape a phishing page has.
+      window.open(r.connectUrl, '_blank', 'noopener');
+      ctx.notify('ok', 'Finish authorising in the new tab, then come back and refresh.');
+    } catch (e) { ctx.notify('crit', e.message); }
+    setBusy(false);
+  }
+
+  async function scout() {
+    setBusy(true); setRun(null);
+    try {
+      const r = await api.corsairScout({ login: login.trim() || undefined });
+      setRun(r);
+      if (!r.callLog.length) ctx.notify('warn', r.notice);
+    } catch (e) { ctx.notify('crit', e.message); }
+    setBusy(false);
+  }
+
+  if (!status) return <Card pad><Skeleton lines={4} /></Card>;
+
+  if (!status.available) {
+    return (
+      <Card flush>
+        <CardHead icon="plug" title="Evidence Scout" sub="Not available on this server" />
+        <div className="card__body">
+          <Alert tone="warn" title="Corsair is not configured here">
+            {status.notice || 'The Scout reads through Corsair, which is not set up on this server.'}
+          </Alert>
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card flush>
+      <CardHead icon="plug" eyebrow="Agent" title="Evidence Scout"
+        sub="Decides which of your connected tools to look at, and shows you every call"
+        right={run && <Badge tone={run.mode === 'AGENT' ? 'ok' : 'info'} dot>{run.mode}</Badge>} />
+
+      <div className="card__body stack">
+        <p className="lede">
+          Most of PIE reasons over evidence you have already given it. This one goes and looks —
+          your repositories, the commits on the ones that matter, whether they run CI, and any
+          course or certificate mail you have. It chooses what to investigate; it cannot change a
+          single score.
+        </p>
+
+        <Alert tone="info" title="What it can and cannot do" icon="lock">
+          <p><b>{status.guarantee}</b></p>
+          <p className="t-12">{status.scopeNotice}</p>
+        </Alert>
+
+        <div className="row row--wrap" style={{ gap: 8 }}>
+          <Badge tone={status.connected ? 'ok' : 'off'} dot>
+            GitHub {status.connected ? 'connected' : 'not connected'}
+          </Badge>
+          {!status.connected && (
+            <Button size="sm" icon="github" disabled={busy} onClick={() => connect('github')}>
+              Connect GitHub via Corsair
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" icon="book" disabled={busy} onClick={() => connect('gmail')}>
+            Connect Gmail
+          </Button>
+        </div>
+
+        <div className="field">
+          <label htmlFor="scout-login">GitHub username (optional)</label>
+          <input id="scout-login" value={login} onChange={e => setLogin(e.target.value)}
+            placeholder="leave blank to use your connected account" />
+        </div>
+
+        <div className="row row--wrap">
+          <Button variant="primary" size="lg" icon="play" disabled={busy} onClick={scout}>
+            {busy ? 'Scouting…' : 'Run the Evidence Scout'}
+          </Button>
+        </div>
+
+        {run && (
+          <>
+            <Alert tone={run.mode === 'AGENT' ? 'ok' : 'warn'} title={run.notice}>
+              <p className="t-12">{run.boundary}</p>
+              {run.modelError && (
+                // The provider's own message. A degraded agent that will not say
+                // why is a bug report nobody can act on.
+                <p className="t-11 mono muted" style={{ marginTop: 6 }}>
+                  {run.provider}: {run.modelError}
+                  <br />Diagnose with <b>node tools/ai-test.mjs</b>
+                </p>
+              )}
+            </Alert>
+
+            <div className="stack" style={{ gap: 8 }}>
+              <b className="t-13">Every call it made</b>
+              {run.callLog.map((c, i) => (
+                <div key={i} className={cx('callrow', !c.ok && 'callrow--refused')}>
+                  <div className="row" style={{ gap: 8, alignItems: 'baseline' }}>
+                    <Badge tone={c.ok ? 'ok' : 'warn'}>{c.ok ? 'ran' : c.reason}</Badge>
+                    <span className="mono t-12">{c.operation}</span>
+                  </div>
+                  {c.why && <div className="t-12 muted">Why: {c.why}</div>}
+                  {/* The arguments PIE sent, not the ones proposed — so a
+                      narrowed Gmail query is visible as narrowed. */}
+                  {c.sent && <div className="t-11 mono muted">sent: {JSON.stringify(c.sent)}</div>}
+                  {c.summary && <div className="t-12">{c.summary}</div>}
+                  {c.detail && <div className="t-11 muted">{c.detail}</div>}
+                </div>
+              ))}
+              {!run.callLog.length && <Empty title="No calls were made" line={run.notice} />}
+            </div>
+          </>
+        )}
+      </div>
+    </Card>
   );
 }
 
@@ -899,7 +1046,7 @@ function OtherImport({ ctx }) {
           <div className="field">
             <label>Type</label>
             <div className="grid g-4" style={{ gap: 8 }}>
-              {[['nontraditional', 'Non-traditional', 'users'], ['sap_learning', 'SAP Learning Hub', 'book'],
+              {[['nontraditional', 'Non-traditional', 'users'], ['learning', 'Learning', 'book'],
                 ['open_source', 'Open source', 'github'], ['other', 'Something else', 'layers']].map(([v, l, i]) => (
                 <button key={v} type="button" className={cx('checkline', f.source === v && 'checkline--on')}
                   onClick={() => set('source', v)}>
@@ -1344,10 +1491,10 @@ function CertificateImport({ ctx }) {
             <div className="field"><label htmlFor="ct">Certificate title</label>
               <input id="ct" className="input" required value={f.title}
                 onChange={e => set('title', e.target.value)}
-                placeholder="e.g. SAP Certified Associate — Back-End Developer" /></div>
+                placeholder="e.g. AWS Certified Developer — Associate" /></div>
             <div className="field"><label htmlFor="ci">Issuing organisation</label>
               <input id="ci" className="input" value={f.issuer}
-                onChange={e => set('issuer', e.target.value)} placeholder="e.g. SAP, AWS, Coursera" /></div>
+                onChange={e => set('issuer', e.target.value)} placeholder="e.g. AWS, Google, Coursera" /></div>
           </div>
 
           <div className="grid g-3">
@@ -1423,10 +1570,10 @@ function HackathonImport({ ctx }) {
           <div className="grid g-2">
             <div className="field"><label htmlFor="hn">Hackathon name</label>
               <input id="hn" className="input" required value={f.name}
-                onChange={e => set('name', e.target.value)} placeholder="e.g. SAP Hackfest 2026" /></div>
+                onChange={e => set('name', e.target.value)} placeholder="e.g. Hack &amp; Build 2026" /></div>
             <div className="field"><label htmlFor="ho">Organiser</label>
               <input id="ho" className="input" value={f.organiser}
-                onChange={e => set('organiser', e.target.value)} placeholder="e.g. SAP Labs India" /></div>
+                onChange={e => set('organiser', e.target.value)} placeholder="e.g. Nagarro" /></div>
           </div>
 
           <div className="grid g-3">

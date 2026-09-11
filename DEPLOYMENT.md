@@ -48,6 +48,7 @@ server/supabase/schema.sql       the tables
 server/supabase/grants.sql       table privileges for the API role
 server/supabase/002_mirror.sql   legacy_id columns, so PIE's own ids survive
 server/supabase/003_auth.sql     password hashes, email verification, face_identities
+server/supabase/004_corsair.sql  the five tables the Corsair SDK owns — only if you use Corsair
 ```
 
 `003_auth.sql` is the new one and it is not optional. Without it, an account restored after a
@@ -108,6 +109,22 @@ without a restart.
 the server console, and email verification is **not enforced** — because a gate nobody can pass is
 an outage, not security. The integrity panel states this explicitly.
 
+### Turning email verification off deliberately
+
+If mail is configured but not delivering, a candidate registers, the send fails, and they are left
+with an account they cannot use. That is worse than not checking the address. One line switches the
+whole step off without removing anything:
+
+```
+EMAIL_VERIFICATION=off
+```
+
+Registration then signs candidates in as it did before the feature existed, no code is sent, and
+nothing downstream demands a verified email. It is reported as `OFF` on its own line in the
+integrity panel, with the words "the address a candidate typed is not proven" — switching off a
+check is a reduction in what PIE claims, and it is shown as one. Remove the variable to turn it
+back on; nothing else changes.
+
 ---
 
 ## Environment variables
@@ -137,6 +154,10 @@ MAIL_FROM
   …or…
 
 SMTP_HOST  SMTP_PORT  SMTP_USER  SMTP_PASS  SMTP_FROM  SMTP_SECURE
+
+  …or, to switch the whole step off…
+
+EMAIL_VERIFICATION=off
 ```
 
 **GitHub OAuth** — only if you want repository import
@@ -151,15 +172,66 @@ GITHUB_CALLBACK_URL         https://your-app.onrender.com/api/github/callback
 
 ```
 OPENAI_API_KEY   or   GEMINI_API_KEY   or   OLLAMA_BASE_URL
-SAP_AI_CORE_DEPLOYMENT_URL + SAP_AI_CORE_AUTH_URL + SAP_AI_CORE_CLIENT_ID + SAP_AI_CORE_CLIENT_SECRET
 ```
 
-**SAP HANA** — optional, and currently blocked on access nobody on the team has
+**Corsair** — optional; GitHub evidence falls back to PIE's own adapter without it
+
+Corsair is an SDK that runs inside this server, not a REST service PIE calls. That is why it needs
+a real database connection and an encryption key, and why **all four are required together** —
+three out of four is not a working integration, and PIE reports it as unconfigured.
 
 ```
-SAP_HANA_HOST  SAP_HANA_PORT  SAP_HANA_USER  SAP_HANA_PASSWORD  SAP_HANA_SCHEMA
-SAP_HANA_MIRROR=1
+CORSAIR_API_KEY             the project key from the Corsair dashboard
+CORSAIR_SIGNING_SECRET      verifies that a Hub delivery really came from Corsair
+CORSAIR_KEK                 encrypts stored authorisations. Generate ONCE:
+                              openssl rand -base64 32
+CORSAIR_DATABASE_URL        Postgres connection string. Supabase → Settings →
+                              Database → Connection string → URI
 ```
+
+Optional:
+
+```
+CORSAIR_TUNNEL=0            do not open a tunnel (set automatically in production)
+CORSAIR_DB_POOL_MAX         connections Corsair may hold open (default 4)
+```
+
+**Gmail evidence** — a Corsair plugin, but the credentials are yours. The Gmail
+plugin has no managed auth type, so this needs a Google Cloud OAuth client you
+register. `GMAIL_SETUP.md` walks through it; budget an hour.
+
+```
+GMAIL_CLIENT_ID
+GMAIL_CLIENT_SECRET
+GMAIL_REDIRECT_URL          optional; must match the URI registered with Google exactly
+```
+
+Absent these, PIE simply does not load the Gmail plugin: the Evidence Scout is
+offered GitHub operations only, and no screen mentions a Gmail feature that does
+not exist. `gmail.readonly` is a Google restricted scope, so an unpublished app
+reaches only the test users you add by hand — which is fine for a demo and is
+reported as such rather than glossed over.
+
+Run `server/supabase/004_corsair.sql` first, or nothing works — the SDK owns five tables in PIE's
+own database and cannot create them itself.
+
+**`CORSAIR_KEK` is a one-way door.** It encrypts every stored authorisation. Change it and every
+candidate who connected through Corsair has to reconnect, with no error message that says so. Set
+it once, keep it with `TOKEN_ENCRYPTION_KEY`, and never regenerate it casually.
+
+Prove it before you need it: `cd server && node tools/corsair-test.mjs`. A key in `.env` is not a
+working integration, and the Integrations screen will keep saying `CONFIGURED_UNVERIFIED` until a
+real call comes back. That check reads `corsair_accounts` specifically — the plugin list looks like
+a health check and is not one, because it answers out of memory and will happily report success
+against a database that does not exist.
+
+**What Corsair can and cannot do to a candidate's GitHub.** PIE runs it read-only, enforced twice:
+the plugin is configured `mode: readonly`, and every call is made inside the SDK's `runReadonly`
+scope, which throws on any write endpoint. `corsair-test.mjs` attempts a real write and reports
+whether it was refused, so the guarantee is demonstrated rather than described. The honest limit:
+Corsair's managed GitHub app requests the `repo`, `user` and `read:org` scopes, so the **token** is
+broader than PIE's use of it. The restriction is PIE's code, not the token's scope, and both the
+Integrations screen and the candidate's connect screen say so.
 
 **Tuning** — sensible defaults, change only with a reason
 
@@ -224,7 +296,7 @@ Assume nothing. These are in order of how often they are the thing that is wrong
    If it is gone, Supabase is not configured or `003_auth.sql` has not been run. This is the one
    people skip and the one that matters.
 2. `GET /api/health` → `ok: true`
-3. Sign in as administrator → **SAP integration readiness**
+3. Sign in as administrator → **Integrations**
    - Supabase → `CONNECTED`
    - Supabase restore at boot → `RESTORED` or `CURRENT`, not `INCOMPLETE`
    - Email → `VERIFIED`, not `CONFIGURED_UNVERIFIED`
@@ -245,6 +317,6 @@ Assume nothing. These are in order of how often they are the thing that is wrong
   with the registered template. It cannot tell a live person from a photograph held to the camera,
   and it says so on the identity screen, in `/api/candidate/identity`, and in the code. Do not let a
   production URL tempt anyone into claiming otherwise.
-- SAP Generative AI Hub reports `OFFLINE_TEMPLATE_MODE` until an SAP AI Core deployment exists.
+- Corsair reports `NOT_CONFIGURED` until a key is set, and `CONFIGURED_UNVERIFIED` until a real call succeeds.
 - `/api/ai/providers` still reports exactly which model is in use and whether candidate data leaves
   your infrastructure.

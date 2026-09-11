@@ -211,7 +211,7 @@ Principles:
 - Respect prerequisites. Do not recommend an advanced objective before its foundation.
 - Prefer activities that produce VERIFIABLE evidence (a repository, a deployed project, a PIE reassessment) over passive consumption.
 - Be concrete: "containerise your existing test suite and push the image" beats "learn Docker".
-- SAP Learning Hub, student edition is an available provider. You may reference it, but never claim PIE can enrol the candidate or verify their completion.
+- External learning providers may be referenced, but never claim PIE can enrol the candidate or verify their completion. Only a PIE practice task produces verified completion.
 
 ${NEVER_RULES}
 

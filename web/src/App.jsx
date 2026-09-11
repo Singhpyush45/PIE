@@ -6,7 +6,7 @@ import AuthScreen from './screens/auth.jsx';
 import CandidateScreens from './screens/candidate.jsx';
 import RecruiterScreens from './screens/recruiter.jsx';
 import AdminScreens from './screens/admin.jsx';
-import SapReadiness from './screens/sap.jsx';
+import Integrations from './screens/integrations.jsx';
 import DemoMode from './screens/demo.jsx';
 
 export default function App() {
@@ -163,7 +163,7 @@ export default function App() {
         <div className="nav__foot">
           <div className="col" style={{ gap: 8 }}>
             <ServiceChip services={services} />
-            <Badge tone="sap" icon="award" >SAP Hackfest 2026 · Theme 2</Badge>
+            <Badge tone="sap" icon="award" >Hack &amp; Build 2026</Badge>
             <Button variant="ghost" size="sm" icon="x" onClick={signOut} style={{ justifyContent: 'flex-start' }}>
               Sign out
             </Button>
@@ -250,7 +250,7 @@ export default function App() {
               {user.role === 'candidate' && <CandidateScreens ctx={ctx} />}
               {user.role === 'recruiter' && <RecruiterScreens ctx={ctx} />}
               {user.role === 'admin' && <AdminScreens ctx={ctx} />}
-              {nav.view === 'sap' && <SapReadiness ctx={ctx} />}
+              {nav.view === 'integrations' && <Integrations ctx={ctx} />}
               {nav.view === 'demo' && <DemoMode ctx={ctx} />}
             </>
           )}

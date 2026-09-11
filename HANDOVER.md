@@ -1,9 +1,9 @@
 # PIE — Handover
 
-**Project:** PIE Career Orchestrator · SAP Hackfest 2026, Theme 2 (Inclusive Workforce)
+**Project:** PIE Career Orchestrator · Hack & Build 2026 (Nagarro, Gurugram)
 **Team:** Vision Nexus, Galgotias University
 **Repo:** `F:\PIE_V3` · **Live:** https://pie-w5w3.onrender.com
-**Updated:** 3 September 2026
+**Updated:** 10 September 2026
 
 This is a handover, not a transcript. It records the decisions that are easy to
 undo by accident, the bugs that were subtle, and what is honestly not finished.
@@ -37,8 +37,7 @@ stale, and a busy port explains itself instead of printing a stack trace.
 | `node assesswalk.mjs` | 16 checks, the full assessment flow |
 | `node recruiterwalk.mjs` | 7 checks, question authoring and modes |
 | `cd server && node tools/mail-test.mjs` | proves SMTP and records it |
-| `cd server && node tools/hana-test.mjs --create` | proves SAP HANA and creates its tables |
-| `cd server && node tools/sap-ai-test.mjs --infer` | proves SAP Generative AI Hub |
+| `cd server && node tools/corsair-test.mjs` | proves the Corsair key with a real call |
 | `cd server && node tools/supabase-doctor.mjs` | diagnoses Supabase |
 
 Green as of this writing: **11/11 test files, 40 + 16 + 7 browser checks, 0 console errors.**
@@ -83,7 +82,7 @@ environment: Supabase service key, model keys, session secret.
 candidate got it wrong", which is a different and false statement.
 
 **Integration adapters must never claim CONNECTED from environment variables.**
-SMTP, Supabase, SAP HANA and SAP AI Core all now require a real call, and the
+SMTP, Supabase and Corsair all require a real call, and the
 result is recorded in `server/data/service-checks.json`, keyed to a fingerprint of
 the settings it was taken against. Change the host and the old pass stops
 counting. Reverting any of this fails 3+ tests per adapter.
@@ -136,6 +135,17 @@ missing interpreter also scores zero.
 
 ---
 
+**`EMAIL_VERIFICATION=off` exists so nobody has to delete the OTP feature to
+escape a broken mail server.** A configured-but-failing SMTP leaves a candidate
+with an account they cannot use, and the instinct is to rip the feature out.
+The switch turns off the whole step — registration signs candidates in, no code
+is sent, and every gate behind it stops demanding a verified email, so the dead
+end does not simply move to the assessment screen. It is never the default and
+it is reported as `OFF` on its own line in the integrity panel, because a check
+that has been switched off is a reduction in what PIE claims.
+
+---
+
 ## 3. THE OPEN PROBLEMS
 
 ### 3a. Live data does not survive a restart — SOLVED IN CODE, needs SQL
@@ -173,100 +183,6 @@ nothing on its own.
 especially `003_auth.sql` — without it the restore brings accounts back with no
 password hash and the failure is silent.
 
-### 3b. SAP HANA is blocked on access the user does not have
-
-**Confirmed, twice.** Signing in to the BTP cockpit as
-`rahul.25scse1010427@galgotiasuniversity.ac.in` returns:
-
-> We couldn't find any global accounts associated with your user.
-
-This was also seen earlier on both the APAC and EMEA cockpit regions. It is the
-account's real state, not a glitch.
-
-**Both of these are true at once, and it is not a contradiction:**
-
-- HANA Cloud Central works — the user opened `Hackfest-DB` and read its config
-- The BTP cockpit reports no global account
-
-The Hackfest practice system is granted through **SAP Learning Hub**, which opens
-the tools in a scoped session for that practice system. It does not make the
-user's identity a member of the global account. So HANA Cloud Central opens, and
-the cockpit does not.
-
-**Consequence: the Service Marketplace and `cf create-service` path is not
-available to this user.** Do not send them there again — it was suggested twice
-and cannot work without someone granting cockpit access first.
-
-**What is left to try, in order:**
-
-1. **SAP Learning Hub → My Learning → the Hackfest 2026 practice system entry.**
-   The "Get started" dialog says "You can find more information about this
-   Practice System in your My Learning". Practice systems often publish their
-   credentials or an exercise guide there. Not yet checked.
-2. **Ask the organisers** — Rahul Sachdev (SAP, sent the access email) or Manish
-   Pant (university coordinator). Ask for *either* a HANA service key / database
-   user for the app, *or* cockpit access to the subaccount. Also ask whether the
-   instance is shared with other teams.
-
-**Do not reset DBADMIN.** The instance may be shared (group numbers appeared as 2
-in the organisers' email and 93 in the user's screenshot), and resetting could
-lock other teams out.
-
-**Nothing else is blocked by this.** Both SAP adapters are complete and tested;
-they need credentials, not code. §3a is unrelated and is the real problem.
-
-### 3b-old. Reference: what the service-key path would have been
-
-Everything for SAP HANA is built and tested. The only thing missing is a database
-user, and the user is blocked on finding the cockpit to create one.
-
-**Do not reset DBADMIN.** The Hackfest instance may be shared with other teams
-(group numbers appeared as 2 in the organisers' email and 93 in the user's
-screenshot). Resetting it could lock other teams out, and it is not needed.
-
-**The right path:** create a `SAP HANA Schemas & HDI Containers` service instance
-with plan **`schema`**, then a service key. SAP generates a dedicated user,
-password and schema. That is also correct practice — an application should never
-connect as the database administrator.
-
-**Their identifiers** (safe to record; these are not secrets):
-
-| | |
-|---|---|
-| Global Account ID | `1358fa2c-c9d2-4351-b59f-4f020b261b9b` |
-| Subaccount ID | `ee0b8b25-c837-4d12-bb07-3e65870ada08` |
-| Region | `eu10` (from the HANA endpoint `prod-eu10`) |
-| HANA instance | `Hackfest-DB`, Running, 16 GB / 80 GB |
-| SQL endpoint | `64e8c26b-3e07-47e9-b246-617058b0306e.hna3.prod-eu10.hanacloud.ondemand.com:443` |
-| Allowed connections | Allow all IP addresses ✓ |
-| Practice system expires | 16 September 2026 |
-
-Direct cockpit URL:
-`https://cockpit.eu10.hana.ondemand.com/cockpit/#/globalaccount/1358fa2c-c9d2-4351-b59f-4f020b261b9b/subaccount/ee0b8b25-c837-4d12-bb07-3e65870ada08`
-
-Then: **Services → Service Marketplace → SAP HANA Schemas & HDI Containers →
-Create** (plan `schema`), then **Instances and Subscriptions → the instance →
-Create Service Key**.
-
-Or with the cf CLI:
-```
-cf login -a https://api.cf.eu10.hana.ondemand.com
-cf create-service hana schema PIE-DB
-cf create-service-key PIE-DB PIE-KEY
-cf service-key PIE-DB PIE-KEY
-```
-
-Note: **HANA Cloud Central cannot create these.** Its "Schemas & HDI Containers"
-page has no Create button — only Instances and Migrations do. The user spent time
-looking there.
-
-If the service is absent from the marketplace, the subaccount lacks the
-entitlement and only the Hackfest organisers can add it.
-
-**Do not make HANA the system of record.** The practice instance expires on 16
-September. PIE writes only its **audit trail and match results** there —
-append-only enterprise records. Accounts and evidence stay in PIE's own store.
-
 ### 3c. GitHub OAuth is broken on the live site
 
 `githubOAuth.js:19-20` falls back to `http://localhost:5174/api/github/callback`
@@ -299,27 +215,32 @@ panel updates without a restart.
 
 ---
 
-## 4. SAP integration — current state
+## 4. Corsair — current state
 
-| Service | State | What is real |
-|---|---|---|
-| SAP HANA Cloud | Adapter complete, **needs a service-key user** | Real `@sap/hana-client` connection, `verify()` runs a live query, two tables, background writes that never block a request |
-| SAP Generative AI Hub | Adapter complete, **needs an AI Core service key** | Real OAuth2 client-credentials flow with token refresh, deployment listing, first in PIE's provider chain |
-| SAP Learning Hub | Confirmed | Skill gaps map to learning objectives and hand off to learning.sap.com. No enrolment API is claimed |
-| SAP BTP / CAP | Proposed | Adapter interface only |
-| SAP Analytics Cloud | Recommended | Rendered in-app today |
-| SuccessFactors | Future | Not implemented |
+PIE moved off SAP on 10 September, when the SAP Hackfest ended and the project was
+entered into **Hack & Build 2026** (Nagarro, Gurugram, 12 September). That event
+asks for Corsair-powered capabilities, so every SAP adapter, screen, test, tool
+and document was removed rather than left dormant.
 
-Both new adapters were previously **stubs that reported CONNECTED from
-environment variables alone**. The HANA one had no driver at all. Both now
-require a real call, and mutation tests confirm the old behaviour fails.
+**What exists.** `server/src/integrations/corsair.js` — the client, `verify()`,
+and a `status()` that reports CONNECTED only after a real call comes back. GitHub
+evidence prefers Corsair's synced data when configured.
 
-The Generative AI Hub adapter also had a real bug: it used a static bearer token,
-but AI Core issues tokens that expire in hours — the AI layer would have died
-partway through a demo with unexplained 401s. It now fetches from the service key
-and refreshes 60 seconds before expiry.
+**What is deliberate.** Corsair is preferred, never required. `fetchRepositories`
+tries Corsair, then GitHub's own API, then labelled demo fixtures, and names the
+source it used. An integration two days old must not be able to break evidence
+import on the morning of a demo.
 
-Environment variable names are in `server/.env.example`. **Never commit values.**
+**What is missing.** A Corsair account. Until `CORSAIR_API_KEY` exists the adapter
+has never made a call, and the Integrations screen says exactly that. Prove it
+with `node tools/corsair-test.mjs` before relying on it — a key in `.env` is not a
+working integration, which is the lesson SAP HANA taught this project the hard way.
+
+**Where the value is, for a pitch.** Not "we added an integration". PIE's reasoning
+was never the hard part; getting a candidate's real work out of the tools they
+already use is. Corsair collapses OAuth-per-service, token refresh and a client per
+API into one shape, and its synced database turns evidence gathering from a fan-out
+of live calls into a local read.
 
 ---
 
@@ -381,6 +302,44 @@ cannot see it crash. `uiwalk.mjs` now clicks every tab.
 
 ---
 
+### The face-verification bug, and why the tests missed it
+
+Registration worked. Every verification afterwards failed. Both mistakes came
+from one wrong assumption — that the model emits unit vectors.
+
+It does not. `FaceRecognitionNet.forwardInput` ends at a matMul with no L2
+normalisation, and a real descriptor measures about **1.39** long. Measured, in
+a real browser, on a real face:
+
+```
+raw descriptor norm                 1.390
+same face, raw vs raw mean          0.058
+same face, raw vs UNIT-normalised   0.393   <- six times larger, pure arithmetic
+```
+
+1. `validDescriptor` required a norm between 0.85 and 1.15, so it rejected every
+   genuine live capture as `BAD_DESCRIPTOR`.
+2. `averageDescriptors` rescaled the registered template to exactly 1, putting
+   the stored template in a different space from every later capture.
+
+Registration survived both, because the rescaling landed its template inside the
+window. That is why the failure looked like it was about the assessment step.
+
+**The tests did not catch it because the synthetic descriptors were unit vectors
+too.** Test data that satisfies an invariant the product violates will agree with
+the product all day. `test/fixtures/descriptors.json` now holds four descriptors
+from the real model, `test/harness/pieServer.mjs` generates at the measured
+scale, and `server/tools/face-descriptor-probe.mjs` regenerates the fixture if
+the model ever changes. Two mutations were run to confirm the new tests fail when
+either mistake is put back.
+
+`TEMPLATE_VERSION` is now `2`. A template stored under `1` cannot be compared, so
+`/api/assessment/identity/verify` clears it, records the reset, and asks the
+candidate to register again — rather than refusing them forever with a message
+about their face.
+
+---
+
 ## 7. What is honestly not done
 
 - **Liveness / anti-spoofing does not exist.** Face verification compares the live
@@ -402,7 +361,7 @@ cannot see it crash. `uiwalk.mjs` now clicks every tab.
   resend than to replicate. If the instance restarts mid-registration the
   candidate presses Resend. Face templates *are* mirrored — an identity that does
   not survive a restart is not an identity.
-- **SAP HANA and SAP AI Core** — adapters finished, blocked on access (§3b).
+- **Corsair** — adapter finished, never called. No account exists yet (§4).
 - Mirror needs `002_mirror.sql` re-run: `proctoring_events.legacy_attempt_id` is missing.
 
 ---
@@ -417,9 +376,8 @@ cannot see it crash. `uiwalk.mjs` now clicks every tab.
 3. **GitHub callback env vars** (§3c) — ten minutes.
 4. **Verify on the deployed instance**, especially the restart test. It is the
    one people skip and the one that matters.
-5. SAP HANA and SAP AI Core (§3b) — **blocked on access nobody on the team has.**
-   The adapters are finished. Do not spend more time on the cockpit; the next
-   move is a message to the organisers, not more configuration.
+5. Corsair (§4) — **create the account and prove the key.** The adapter is done;
+   an unproven integration is worth nothing on stage.
 6. GitHub source-code import; liveness detection.
 
 ---
@@ -433,18 +391,18 @@ server/src/
   assessment.js                policy, bank, blueprint, grading, public serialisers
   assessmentAI.js              question generation, validation, modes, languages
   ai/agents.js                 narration + decision briefs
-  ai/provider.js               SAP GenAI → OpenAI → Gemini → Ollama → templates
+  ai/provider.js               OpenAI → Gemini → Ollama → templates
   execution/runner.js          docker arguments and the execute() contract
-  integrations/sapHanaRepository.js   real HANA connection, schema, writes
-  integrations/sapGenAiHub.js         real OAuth2 to SAP AI Core
+  integrations/corsair.js      Corsair client, verify(), honest status()
+  integrations/githubEvidenceAdapter.js  Corsair → GitHub API → demo fixtures
   persistence/mirror.js        write-behind Supabase mirror
   persistence/hydrate.js       reads it all back at boot — accounts survive a restart
-  persistence/hanaMirror.js    audit + match results into HANA
   persistence/checks.js        durable verification records
   emailVerification.js         four-digit codes: generation, hashing, attempts, tickets
   faceIdentity.js              the template, the comparison, the single-use ticket
   mailer.js                    SMTP and the Resend/Brevo HTTPS APIs
   supabase/003_auth.sql        password hashes, email verification, face_identities
+  tools/corsair-test.mjs       proves the Corsair key with a real call
 web/src/
   assessmentUI.jsx             consent, preflight, IDENTITY, live attempt, result
   faceWatch.js                 face PRESENCE during an attempt (pico.js) — counts faces

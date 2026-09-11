@@ -2,7 +2,7 @@
   "name": "pie-career-orchestrator",
   "private": true,
   "version": "4.0.0",
-  "description": "PIE Career Orchestrator \u2014 SAP Hackfest 2026, Theme 2: Inclusive Workforce",
+  "description": "PIE Career Orchestrator \u2014 evidence-first, inclusive hiring intelligence",
   "scripts": {
     "setup": "cd server && npm install && cd ../web && npm install",
     "build": "cd web && npm run build",

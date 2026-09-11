@@ -265,7 +265,7 @@
 <header class="top">
   <div class="wrap">
     <div class="stamp">
-      SAP Hackfest 2026 <span class="sep">/</span> Theme 2 <span class="sep">/</span> Inclusive Workforce
+      Hack &amp; Build 2026 <span class="sep">/</span> Inclusive, evidence-first hiring
     </div>
     <h1>PIE Career Orchestrator</h1>
     <p class="lead col" style="margin-top:14px">
@@ -507,7 +507,7 @@
         <div class="layer__n">1</div>
         <div class="layer__body">
           <h3>React frontend</h3>
-          <p>Five workspaces — candidate, recruiter, Trust &amp; Integrity admin, SAP readiness, and a presenter mode. Compiled by Vite and served as static assets by the same process.</p>
+          <p>Five workspaces — candidate, recruiter, Trust &amp; Integrity admin, Integrations, and a presenter mode. Compiled by Vite and served as static assets by the same process.</p>
           <div class="layer__files">web/src · 7,389 lines</div>
         </div>
       </div>
@@ -539,7 +539,7 @@
         <div class="layer__n">5</div>
         <div class="layer__body">
           <h3>AI narration layer</h3>
-          <p>Reads the computed result and writes English. Provider order: SAP Generative AI Hub → OpenAI → Gemini → local Ollama → deterministic templates. The first configured one wins.</p>
+          <p>Reads the computed result and writes English. Provider order: OpenAI → Gemini → local Ollama → deterministic templates. The first configured one wins.</p>
           <div class="layer__files">ai/agents.js · ai/provider.js</div>
         </div>
       </div>
@@ -772,7 +772,7 @@
       <p class="prose">
         The JSON store is authoritative. Supabase receives writes in the background so the
         enterprise path is real rather than described — but nothing reads from it yet, and
-        the SAP readiness page says exactly that rather than implying a live database.
+        the Integrations page says exactly that rather than implying a live database.
       </p>
     </div>
 
@@ -825,17 +825,17 @@
     </figure>
   </section>
 
-  <!-- ══════════════════════════════════════════════ SAP ═════════════ -->
+  <!-- ══════════════════════════════════════ integrations ═════════════ -->
   <section>
     <div class="head">
-      <div class="eyebrow">SAP ecosystem</div>
-      <h2>What is wired, and what is not</h2>
+      <div class="eyebrow">Integrations</div>
+      <h2>What is wired, and what is proven</h2>
     </div>
     <div class="col">
       <p class="prose">
-        Every state below is read from its adapter at request time. PIE never claims a live
-        SAP integration unless credentials, endpoints and actual connectivity exist — and
-        the readiness page in the product shows the same states this table does.
+        Every state below is read from its adapter at request time. An adapter says
+        <em>Connected</em> only after a real call has come back — having the credentials is never
+        enough, and the Integrations page in the product shows the same states this table does.
       </p>
     </div>
 
@@ -844,44 +844,47 @@
         <thead><tr><th>Service</th><th>Classification</th><th>What exists today</th></tr></thead>
         <tbody>
           <tr>
-            <td>SAP Generative AI Hub</td>
-            <td><span class="chip chip--live">Confirmed</span></td>
-            <td>Adapter wired and first in the provider order; activates the moment a deployment URL and token are present.</td>
-          </tr>
-          <tr>
-            <td>SAP Learning Hub, student edition</td>
-            <td><span class="chip chip--live">Confirmed</span></td>
-            <td>Skill gaps map to learning objectives and hand the candidate off to learning.sap.com. No enrolment or completion API is claimed.</td>
-          </tr>
-          <tr>
-            <td>SAP BTP / CAP</td>
+            <td>Corsair</td>
             <td><span class="chip chip--proposed">Proposed</span></td>
-            <td>Adapter interface implemented. No subaccount or CAP endpoint provisioned; PIE Core runs standalone.</td>
+            <td>One shape for every third-party service: <code>db</code> for already-synced data,
+                <code>api</code> for the live call. PIE reads GitHub evidence through it when
+                configured. Promotes to Confirmed only when a real call succeeds.</td>
           </tr>
           <tr>
-            <td>SAP HANA Cloud</td>
-            <td><span class="chip chip--proposed">Proposed</span></td>
-            <td>Adapter interface implemented. No instance provisioned; the JSON store remains the system of record.</td>
+            <td>GitHub</td>
+            <td><span class="chip chip--live">Confirmed</span></td>
+            <td>Repositories, languages and activity as <em>supporting</em> evidence. Three sources
+                in order — Corsair's synced data, GitHub's own API, labelled demo fixtures — and PIE
+                names the one it actually used.</td>
           </tr>
           <tr>
-            <td>SAP Analytics Cloud</td>
-            <td><span class="chip chip--proposed">Recommended</span></td>
-            <td>Intended destination for cohort placement-readiness and skill-gap analytics. Rendered in-app today.</td>
+            <td>Supabase</td>
+            <td><span class="chip chip--live">Confirmed</span></td>
+            <td>Durable accounts, evidence and decisions. Written through on every change and read
+                back at boot, so an account outlives a restart on an ephemeral host.</td>
           </tr>
           <tr>
-            <td>SuccessFactors / Talent Intelligence Hub</td>
-            <td><span class="chip chip--future">Future</span></td>
-            <td>Not implemented. Requires a tenant and validated API scopes.</td>
+            <td>Email (SMTP or HTTPS API)</td>
+            <td><span class="chip chip--live">Confirmed</span></td>
+            <td>Verification codes and reset links. Reports Verified only once a message has been
+                accepted for delivery.</td>
+          </tr>
+          <tr>
+            <td>LLM provider</td>
+            <td><span class="chip chip--live">Confirmed</span></td>
+            <td>OpenAI, Gemini or a model you host yourself. Narration only — every score is
+                identical with it or without it.</td>
           </tr>
         </tbody>
       </table>
     </div>
 
     <div class="note col" style="margin-top:24px; max-width:none">
-      <strong>What PIE contributes to an SAP talent stack.</strong> Not another applicant tracker.
-      An evidence layer that turns résumés, repositories, certificates, hackathons and an
-      administered assessment into skill confidences with named provenance — then matches on
-      those alone, audits itself for bias, and hands a human the reasoning rather than a ranking.
+      <strong>Why the plumbing is the interesting part.</strong> PIE's reasoning was never the hard
+      bit. Getting a candidate's real work out of the tools they already use — OAuth per service,
+      tokens to refresh, rate limits, a different client for every API — is what stands between an
+      evidence-first hiring product and a form. Corsair collapses that into one shape, and its
+      synced database turns evidence gathering from a fan-out of live calls into a local read.
     </div>
   </section>
 
@@ -923,7 +926,7 @@
   <footer>
     <div class="col">
       PIE Career Orchestrator · Team Vision Nexus, Galgotias University ·
-      SAP Hackfest 2026, Theme 2: Inclusive Workforce.
+      Hack &amp; Build 2026.
       Figures reflect the codebase at <span class="mono">F:\PIE_V3</span>.
     </div>
   </footer>

@@ -40,7 +40,7 @@ export const VIEWS = {
   'a-people':     { title: 'People & roles',       section: 'Governance', role: 'admin', icon: 'users' },
 
   /* --- shared --- */
-  'sap':          { title: 'SAP integration readiness', section: 'Platform', role: '*', icon: 'plug' },
+  'integrations': { title: 'Integrations', section: 'Platform', role: '*', icon: 'plug' },
   'demo':         { title: 'Grand Finale demo',    section: 'Platform', role: '*', icon: 'play' },
 };
 

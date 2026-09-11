@@ -119,7 +119,7 @@ export function status() {
   const proven = verified ? null : checks.read('smtp', smtpFingerprint());
   // "Configured" means the variables are present, NOT that a message has ever
   // left the building. Saying "links are sent from X" before proving it is the
-  // same overclaim PIE refuses to make about SAP.
+  // same overclaim PIE refuses to make about any integration.
   const state = !isConfigured() ? 'NOT_CONFIGURED'
     : lastError ? 'DEGRADED'
       : (verified || proven?.ok) ? 'VERIFIED' : 'CONFIGURED_UNVERIFIED';

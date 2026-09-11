@@ -35,13 +35,18 @@
 
 const MODEL_URL = '/face/models';
 
-/** How close two descriptors must be to be called the same person.
+/**
+ * How close two descriptors must be to be called the same person.
  *
- *  0.6 is the value this model family was characterised at, and the one every
- *  reference implementation uses. PIE uses 0.55: slightly stricter, because the
- *  cost of wrongly admitting someone else is higher than the cost of asking an
- *  honest candidate to try again in better light. */
-export const MATCH_THRESHOLD = 0.55;
+ * 0.6 is the figure this model family is characterised at, and it applies to
+ * the descriptor EXACTLY AS THE MODEL PRODUCES IT. That last part matters: the
+ * network's final layer is a plain fully-connected layer with no L2
+ * normalisation, so a real descriptor has a norm around 1.39, not 1. Rescaling
+ * one side of a comparison and not the other moves the distance by more than
+ * the difference between two faces does — measured at 0.39 against 0.06 for the
+ * same face — so nothing here normalises anything.
+ */
+export const MATCH_THRESHOLD = 0.6;
 
 let apiPromise = null;
 let ready = false;
@@ -173,12 +178,20 @@ export function closeCamera(stream) {
 
 /* ---------------------------------------------------------------- averaging */
 /**
- * Averages several descriptors into one, then re-normalises to unit length.
+ * Averages several descriptors into one.
  *
  * A single frame catches one expression, one angle, one moment of lighting.
- * Registering from three or four and averaging gives a template that generalises
- * — and the re-normalisation matters, because the distance threshold is only
- * meaningful for unit vectors, and the mean of unit vectors is not one.
+ * Registering from three or four and averaging gives a template that
+ * generalises.
+ *
+ * A PLAIN mean, with no rescaling afterwards. An earlier version divided by the
+ * length to make a unit vector, on the assumption that the model emits unit
+ * vectors. It does not — `FaceRecognitionNet.forwardInput` ends at a matMul with
+ * no normalisation, and a real descriptor measures about 1.39 long. So that step
+ * put the registered template in one space and every later live capture in
+ * another, and the gap it opened (0.39) was six times the distance between two
+ * captures of the same face (0.06). Registration succeeded, every verification
+ * afterwards failed, and nothing in either message pointed at arithmetic.
  */
 export function averageDescriptors(list) {
   const valid = (list || []).filter(d => Array.isArray(d) && d.length === 128);
@@ -186,8 +199,7 @@ export function averageDescriptors(list) {
   const out = new Array(128).fill(0);
   for (const d of valid) for (let i = 0; i < 128; i += 1) out[i] += d[i];
   for (let i = 0; i < 128; i += 1) out[i] /= valid.length;
-  const norm = Math.sqrt(out.reduce((a, v) => a + v * v, 0)) || 1;
-  return out.map(v => v / norm);
+  return out;
 }
 
 /** Euclidean distance. Exported so a test can assert the same maths the server

@@ -780,3 +780,9 @@ button.journey__hit:focus-visible{outline:2px solid var(--brand-500);outline-off
 .setup>summary:hover{color:var(--ink-2)}
 .setup__body{margin-top:5px;padding-left:12px;border-left:2px solid var(--line-2);
   font-size:var(--fs-11);color:var(--ink-3);line-height:1.55}
+
+/* Evidence Scout — one row per Corsair call the agent made or was refused. */
+.callrow{border:1px solid var(--line-2);border-radius:8px;padding:8px 10px;
+  background:var(--surface-2);display:flex;flex-direction:column;gap:4px}
+.callrow--refused{border-style:dashed;opacity:.85}
+.callrow .mono{word-break:break-all}

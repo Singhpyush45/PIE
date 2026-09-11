@@ -14,11 +14,13 @@ import * as db from './store.js';
 import { seedIfEmpty } from './seed.js';
 import { landscape } from './integrations/index.js';
 import * as githubAdapter from './integrations/githubEvidenceAdapter.js';
+import * as corsairSdk from './integrations/corsairClient.js';
+import { SESSION_COOKIE, resolveSession } from './auth.js';
 import * as supabase from './persistence/supabase.js';
 import * as mailer from './mailer.js';
+import * as otp from './emailVerification.js';
 import * as mirror from './persistence/mirror.js';
 import * as hydrate from './persistence/hydrate.js';
-import * as hanaMirror from './persistence/hanaMirror.js';
 import {
   authenticate, requireAuth, rateLimit, str, bad, isEmail,
   sessionUser, publicProfile, publicReq, publicApp, candidateApplications, inWorld,
@@ -35,6 +37,42 @@ import { registerAdminRoutes } from './routes/admin.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const app = express();
 app.use(cors());
+
+// ---------------------------------------------------------------- Corsair
+//
+// Mounted BEFORE express.json(), and that ordering is the whole point rather
+// than a style preference. Corsair Hub signs its deliveries with an HMAC over
+// the exact bytes on the wire; express.json() consumes the request stream and
+// hands on a parsed object, and re-serialising that object does not reproduce
+// those bytes — key order and whitespace both move. Behind the parser every
+// signed delivery fails verification, for a reason nothing in the error says.
+//
+// Nothing is mounted at all unless Corsair is fully configured, so a PIE with
+// no Corsair credentials has exactly the routing table it had before.
+if (corsairSdk.isConfigured()) {
+  const [corsairClient, toExpressHandler] = await Promise.all([
+    corsairSdk.client(), corsairSdk.expressHandler(),
+  ]);
+  if (corsairClient && toExpressHandler) {
+    app.use('/api/corsair', toExpressHandler(corsairClient, {
+      basePath: '/api/corsair',
+      // The tenant comes from PIE's own session cookie, never from the request
+      // body. Without this a browser could name any tenant it liked and read
+      // another candidate's connection state.
+      resolveTenant: req => {
+        try {
+          const raw = req.headers.get('cookie') || '';
+          const hit = raw.split(';').map(s => s.trim())
+            .find(s => s.startsWith(`${SESSION_COOKIE}=`));
+          if (!hit) return null;
+          const resolved = resolveSession(decodeURIComponent(hit.slice(SESSION_COOKIE.length + 1)));
+          return resolved ? corsairSdk.tenantFor(resolved.user) : null;
+        } catch { return null; }
+      },
+    }));
+  }
+}
+
 app.use(express.json({ limit: '4mb' }));
 app.use(cookieParser());
 app.use(authenticate);
@@ -60,9 +98,6 @@ const adminBoot = await ensureAdminAccount();
 // Subscribe the mirror AFTER the store is loaded and seeded, so a boot does not
 // re-push the whole demo world as if it were new writes.
 const mirrorOn = mirror.attach();
-// The enterprise-record path. Off unless SAP_HANA_MIRROR=1 and HANA is
-// configured; attaching is harmless either way.
-hanaMirror.attach();
 
 /* ================================================================== HEALTH */
 app.get('/api/health', (_req, res) => res.json({
@@ -79,17 +114,49 @@ app.get('/api/services', requireAuth, (req, res) => {
       { key: 'ai', name: ai.provider, state: ai.mode, detail: ai.note,
         classification: ai.enabled ? 'CONFIRMED — configured' : 'OFFLINE — deterministic engine only',
         limitation: ai.caution || undefined,
-        requires: 'One of: SAP_AI_CORE_*, OPENAI_API_KEY, GEMINI_API_KEY, OLLAMA_BASE_URL — or none at all.' },
+        requires: 'One of: OPENAI_API_KEY, GEMINI_API_KEY, OLLAMA_BASE_URL — or none at all.' },
       githubAdapter.status(),
       supabase.status(),
       mailer.status(),
+      emailVerificationStatus(),
       mirror.status(),
       hydrateStatus(),
-      hanaMirror.status(),
       ...landscape().services,
     ],
   });
 });
+
+/**
+ * Whether a candidate has to prove their email address.
+ *
+ * Its own line rather than a footnote on the mail status, because "we can send
+ * email" and "we require a code" are different claims and a jury is entitled to
+ * see which one is true. Switching it off is a real reduction in what PIE
+ * checks, so it is reported as one.
+ */
+function emailVerificationStatus() {
+  const required = otp.REQUIRED();
+  const canSend = mailer.isConfigured();
+  const state = !required ? 'OFF' : canSend ? 'ENFORCED' : 'UNAVAILABLE';
+  return {
+    key: 'email_verification',
+    name: 'Candidate email verification',
+    state,
+    detail: {
+      ENFORCED: 'A candidate account is not usable until a four-digit code sent to that address is '
+        + 'entered. The code is generated and checked by PIE — no third-party verification service.',
+      OFF: 'Switched off with EMAIL_VERIFICATION=off. Candidates are signed in at registration and the '
+        + 'address they typed is NOT proven to be theirs. Remove that variable to turn it back on.',
+      UNAVAILABLE: 'No mail transport is configured, so no code can be sent and none is required. '
+        + 'A gate nobody can pass would lock every candidate out rather than protect anything. '
+        + 'Configure SMTP_* or MAIL_HTTP_PROVIDER to enforce it.',
+    }[state],
+    classification: state === 'ENFORCED'
+      ? 'CONFIRMED — enforced server-side before an account becomes usable'
+      : 'OFF — the address a candidate typed is not proven',
+    requires: 'A mail transport, and EMAIL_VERIFICATION unset (or anything other than "off")',
+  };
+}
 
 /** What the last boot managed to restore. Read by the integrity dashboard. */
 function hydrateStatus() {
@@ -141,7 +208,7 @@ app.post('/api/system/mirror/sync', requireAuth, rateLimit(4, 60_000), async (re
 /** Every LLM provider PIE can use, and where each stands. Read by the UI. */
 app.get('/api/ai/providers', requireAuth, (_req, res) => res.json(providerLandscape()));
 
-app.get('/api/sap/landscape', requireAuth, (_req, res) => res.json(landscape()));
+app.get('/api/integrations/landscape', requireAuth, (_req, res) => res.json(landscape()));
 
 /* ============================================================== BOOTSTRAP */
 app.get('/api/bootstrap', requireAuth, (req, res) => {
@@ -251,6 +318,14 @@ if (process.env.PIE_NO_LISTEN !== '1') {
     printEnvBanner();
     console.log(`  AI: ${ai.provider} [${ai.mode}]`);
     if (mirrorOn) console.log('  Supabase mirror: ON (writes are pushed in the background)');
+    if (corsairSdk.isConfigured()) {
+      console.log('  Corsair: SDK active — evidence reads are tenant-scoped and read-only.');
+      // The SDK prints a notice at init offering to enable workflow execution.
+      // Saying here that the answer is no stops it reading as something left
+      // undone: it evaluates Hub-delivered code in-process, and PIE has no use
+      // for it.
+      console.log('           Hub workflow execution is deliberately OFF (it would run remote code in-process).');
+    }
     const restore = hydrate.bootLine(hydration);
     if (restore) console.log(restore);
     console.log(`  Store: ${c.users} users · ${c.candidateProfiles} candidates · ${c.requisitions} requisitions · ${c.evidence} evidence`);

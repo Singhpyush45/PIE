@@ -29,6 +29,25 @@ import crypto from 'node:crypto';
 import * as db from './store.js';
 import { keyedHash, sameHash } from './secrets.js';
 
+/* ------------------------------------------------------------------ switch */
+/**
+ * Whether PIE asks for a code at all.
+ *
+ * `EMAIL_VERIFICATION=off` turns the whole step off — registration signs a
+ * candidate in as it always did, and no screen, route or gate mentions a code.
+ *
+ * This exists because the feature and the mail server are two different things
+ * that fail separately. When SMTP is misconfigured, a candidate registers, the
+ * send fails, and they are left with an account they cannot use — a dead end on
+ * a demo day. Deleting the feature to escape that would also delete the answer
+ * to "how do you know the email belongs to them", so instead it can be switched
+ * off in one line and switched back on when the mail path is proven.
+ *
+ * Turning it off is a real reduction in what PIE checks, so it is never the
+ * default and the integrity panel says plainly when it is in effect.
+ */
+export const REQUIRED = () => String(process.env.EMAIL_VERIFICATION || '').toLowerCase() !== 'off';
+
 /* ------------------------------------------------------------------ policy */
 export const POLICY = {
   digits: 4,

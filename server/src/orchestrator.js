@@ -375,7 +375,7 @@ function safeResult(ctx) {
       disclosure: 'No target role was supplied, so no match was computed.',
     },
     learning: ctx.learning || {
-      notRun: true, objectives: [], totalHours: 0, sapResourceCount: 0,
+      notRun: true, objectives: [], totalHours: 0, verifiedResourceCount: 0,
       integrationModel: 'LINK_REDIRECTION',
       integrationNotice: 'Not run — a learning pathway is generated from a skill gap against a target role.',
     },

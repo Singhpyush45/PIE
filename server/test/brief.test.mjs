@@ -50,7 +50,7 @@ const DISCOVERY = { skills: [{ id: 'sql', name: 'SQL', confidence: 0.88, sourceC
 // came from — so the test passed while the real pathway came back empty on
 // every rejection. A fixture that does not match production proves nothing.
 const LEARNING = {
-  pathway: { source: 'PIE ontology + SAP Learning Hub' },
+  pathway: { source: 'PIE ontology + open learning resources' },
   objectives: [
     { objectiveId: 'obj-cicd', skillId: 'cicd', skill: 'CI/CD', from: 0.1, to: 0.7 },
     { objectiveId: 'obj-docker', skillId: 'docker', skill: 'Docker / Containers', from: 0.2, to: 0.6 },

@@ -115,7 +115,32 @@ await check('the walk leaves the requisition as it found it', async () => {
   await page.waitForTimeout(1400);
   const on = await page.locator('.modecard--on').innerText();
   if (!/AI-generated/i.test(on)) throw new Error('the mode was not restored');
-  return 'mode restored to AI-generated';
+
+  // And retire the questions this walk authored.
+  //
+  // Restoring the mode but not the question set made this walk pass exactly
+  // once. Two checks above assert that "Only my questions" is BLOCKED while the
+  // set is empty — a precondition the walk itself destroyed on its way past, so
+  // every subsequent run reported two failures that described the walk's own
+  // leftovers rather than anything about PIE. A check that is only true the
+  // first time is worse than no check: it reads as a regression appearing out
+  // of nowhere, two days before it matters.
+  // Counted by the Retire buttons rather than by table rows: this screen renders
+  // more than one `.dt` table, and the broader selector quietly counted the
+  // requisition list too — which is how a cleanup step reports thirteen
+  // leftovers on a set containing one.
+  const retireButtons = () => page.getByRole('button', { name: /^retire$/i });
+  let retired = 0;
+  for (let guard = 0; guard < 25; guard += 1) {
+    if (!await retireButtons().count()) break;
+    await retireButtons().first().click();
+    await page.waitForTimeout(700);
+    retired += 1;
+  }
+  const left = await retireButtons().count();
+  if (left) throw new Error(`${left} authored question(s) were left behind — the next run will fail on them`);
+
+  return `mode restored to AI-generated; ${retired} authored question(s) retired`;
 });
 
 console.log(`\n  ${res.filter(Boolean).length}/${res.length} checks passed`);

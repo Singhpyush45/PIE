@@ -121,7 +121,7 @@ if (v.detail) line('server said', v.detail);
 if (v.ok) {
   // The result is written to server/data/service-checks.json, so the running
   // server picks it up. It used to live only in this process's memory, which is
-  // why the SAP page kept saying "no message has been sent yet" after a pass.
+  // why the Integrations page kept saying "no message has been sent yet" after a pass.
   line('recorded', 'saved — the app will now show Email (SMTP) as VERIFIED');
 }
 

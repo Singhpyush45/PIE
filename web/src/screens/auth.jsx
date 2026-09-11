@@ -91,7 +91,7 @@ export default function AuthScreen({ onSignedIn, theme, setTheme, notice }) {
       <footer className="entry__foot">
         <span><b>PIE</b> · Potential over pedigree</span>
         <span className="entry__dot">·</span>
-        <span>SAP Hackfest 2026 — Theme 2: Inclusive Workforce</span>
+        <span>Hack &amp; Build 2026 — inclusive, evidence-first hiring</span>
       </footer>
     </div>
   );

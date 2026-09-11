@@ -1,14 +1,18 @@
 // Candidate workspace routes: profile, evidence ingestion, applications.
 
 import * as db from '../store.js';
+import { LEARNING_PROVIDERS, LEARNING_RESOURCES } from '../data.js';
 import {
   requireAuth, requireRole, rateLimit, str, bad, sanitize, safeFilename,
   materializeCandidate, publicProfile, publicApp, candidateApplications, publicReq,
   ownedProfileId, advanceApplication, inWorld, sameWorld,
 } from '../lib.js';
-import * as sapLearningHub from '../integrations/sapLearningHub.js';
 import * as identity from '../faceIdentity.js';
 import * as mailer from '../mailer.js';
+import * as otp from '../emailVerification.js';
+
+/** Email is only a precondition where a code can actually be asked for. */
+const identityGateNeedsEmail = () => otp.REQUIRED() && mailer.isConfigured();
 import { parseResume } from '../ai/agents.js';
 
 const TRUST = {
@@ -58,8 +62,8 @@ export function registerCandidateRoutes(app) {
     const user = db.findById('users', req.user.id);
     res.json({
       ...identity.publicIdentity(req.user.candidateProfileId),
-      emailVerified: Boolean(user?.emailVerified) || Boolean(user?.isDemo) || !mailer.isConfigured(),
-      emailVerificationEnforced: mailer.isConfigured(),
+      emailVerified: Boolean(user?.emailVerified) || Boolean(user?.isDemo) || !identityGateNeedsEmail(),
+      emailVerificationEnforced: identityGateNeedsEmail(),
       threshold: identity.MATCH_THRESHOLD,
       algorithm: identity.ALGORITHM,
       liveness: {
@@ -85,7 +89,7 @@ export function registerCandidateRoutes(app) {
     if (!user) return res.status(401).json({ error: 'Sign in again.' });
     // Same rule as the assessment gate: enforced only where a code can actually
     // be sent. See the note there.
-    if (mailer.isConfigured() && !user.emailVerified && !user.isDemo) {
+    if (identityGateNeedsEmail() && !user.emailVerified && !user.isDemo) {
       return res.status(403).json({
         error: 'Verify your email address before registering your identity.',
         reason: 'EMAIL_UNVERIFIED',
@@ -158,7 +162,7 @@ export function registerCandidateRoutes(app) {
 
   app.post('/api/candidate/evidence', ...asCandidate, rateLimit(60, 60_000), (req, res) => {
     const source = str(req.body?.source, 30);
-    const allowed = ['project', 'certificate', 'hackathon', 'nontraditional', 'resume', 'sap_learning'];
+    const allowed = ['project', 'certificate', 'hackathon', 'nontraditional', 'resume', 'learning'];
     if (!allowed.includes(source)) return bad(res, `source must be one of: ${allowed.join(', ')}`);
     const title = sanitize(req.body?.title, 240);
     if (title.length < 3) return bad(res, 'Please give this evidence a title.');
@@ -430,8 +434,8 @@ export function registerCandidateRoutes(app) {
   app.get('/api/candidate/learning', ...asCandidate, (req, res) => {
     res.json({
       progress: db.filter('learningProgress', l => l.candidateProfileId === req.user.candidateProfileId),
-      provider: sapLearningHub.status(),
-      resources: sapLearningHub.fetchCourses(),
+      providers: Object.values(LEARNING_PROVIDERS),
+      resources: LEARNING_RESOURCES,
     });
   });
 

@@ -21,6 +21,19 @@ const db = await import('../src/store.js');
 const identity = await import('../src/faceIdentity.js');
 const { personDescriptor, sameFace } = await import('./harness/pieServer.mjs');
 
+// The browser half, imported directly. It has no top-level dependency on
+// face-api — the model is imported dynamically inside load() — so the pure
+// functions can be checked here against the server's.
+const web = await import('../../web/src/faceIdentity.js');
+
+// Four real descriptors from the real model, computed in a real browser from
+// fixtures/one-face.jpg and three mild variations of it. Everything below that
+// says "real" means these.
+const REAL = JSON.parse(fs.readFileSync(
+  path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'fixtures/descriptors.json'), 'utf8')).samples;
+
+const norm = v => Math.sqrt(v.reduce((a, x) => a + x * x, 0));
+
 const CAND = 'cand_owner';
 const USER = 'usr_owner';
 const reset = () => {
@@ -47,6 +60,77 @@ test('1 — the geometry the whole thing rests on', () => {
   assert.equal(identity.distance(alice, alice), 0);
 });
 
+/* ══════════════════════════════ THE BUG THAT ONLY A REAL FACE COULD FIND
+   Registration worked and every verification afterwards failed.
+
+   Two mistakes, both from the same wrong assumption — that the model emits unit
+   vectors. It does not: FaceRecognitionNet ends at a matMul with no
+   normalisation, and a real descriptor measures about 1.39 long.
+
+     1. validDescriptor required a norm between 0.85 and 1.15, so it rejected
+        every genuine live capture as BAD_DESCRIPTOR.
+     2. Registration rescaled its averaged template to exactly 1, putting the
+        stored template in a different space from every later capture. Measured:
+        0.39 of pure arithmetic, against 0.06 for the same face — most of the
+        matching budget spent before a face was even considered.
+
+   Registration survived both because the rescaling landed it inside the window.
+
+   None of the existing tests caught it, because the synthetic descriptors they
+   used were unit vectors too. Synthetic data that satisfies an invariant the
+   product violates will agree with the product all day. These tests use real
+   model output.                                                              */
+
+test('2a — a descriptor from the real model is accepted', () => {
+  for (const d of REAL) {
+    assert.equal(identity.validDescriptor(d), true,
+      `the model produced this; PIE must accept it (norm ${norm(d).toFixed(3)})`);
+  }
+  // The measured scale, asserted so a future "tidy-up" cannot quietly reintroduce
+  // a unit-length assumption.
+  for (const d of REAL) {
+    assert.ok(norm(d) > 1.2 && norm(d) < 1.6,
+      `real descriptors are around 1.39 long, not 1 — this one is ${norm(d).toFixed(3)}`);
+  }
+});
+
+test('2b — the registered template and a live capture are in the same space', () => {
+  // Register the way the browser does: average several captures.
+  const template = web.averageDescriptors(REAL.slice(0, 3));
+  assert.ok(template, 'averaging must produce a template');
+
+  // The fourth real capture is the person turning up to sit their assessment.
+  const live = REAL[3];
+  const d = identity.distance(template, live);
+
+  assert.ok(d < 0.15,
+    `the same face against its own template must be close; got ${d.toFixed(3)}. `
+    + 'A large number here means one side has been rescaled and the other has not.');
+  assert.ok(norm(template) > 1.2,
+    'averaging must not renormalise — that is exactly what broke verification');
+});
+
+test('2c — end to end with real descriptors: register, then verify', () => {
+  reset();
+  const template = web.averageDescriptors(REAL.slice(0, 3));
+  const reg = identity.register({ candidateProfileId: CAND, userId: USER, descriptor: template });
+  assert.equal(reg.ok, true, reg.detail);
+
+  const v = identity.verify({ candidateProfileId: CAND, userId: USER, descriptor: REAL[3] });
+  assert.equal(v.ok, true,
+    `the person who registered must pass. distance ${v.distance}, threshold ${identity.MATCH_THRESHOLD}`);
+  assert.ok(v.distance < 0.2);
+});
+
+test('2d — an all-zero descriptor is refused', () => {
+  // face-api returns a zero-filled descriptor for a degenerate input. Stored as
+  // a template it would sit at the origin and match nobody consistently; sent as
+  // a live capture it is not a face. The bounds were loosened to accept the
+  // model's real scale, so the floor is what still has to catch this.
+  assert.equal(identity.validDescriptor(new Array(128).fill(0)), false);
+  assert.equal(identity.validDescriptor(new Array(128).fill(1e-6)), false);
+});
+
 test('2 — the browser and the server agree on what "match" means', async () => {
   // The screen shows a preview of the decision; the server makes it. If the two
   // thresholds drift apart the preview becomes a lie — a candidate told "ready
@@ -60,14 +144,22 @@ test('2 — the browser and the server agree on what "match" means', async () =>
 });
 
 test('3 — a descriptor that is not a face is refused', () => {
+  // What this check is: a shape and range test. It rejects the things that are
+  // not 128 numbers from a neural network at all.
+  //
+  // What it is NOT: a face detector. A vector of plausible-looking constants
+  // passes it, and that is correct — deciding whether something is a face is
+  // the model's job in the browser, and deciding whether it is the RIGHT face
+  // is verify()'s. Tightening this into a face detector by guessing at norms is
+  // exactly what broke live verification once already.
   const bad = [
     [], null, undefined, 'a-string', { 0: 0.1 },
     new Array(127).fill(0.05),                       // wrong length
-    new Array(128).fill(0.05),                       // not unit length
+    new Array(128).fill(0),                          // the model's degenerate output
     [...alice.slice(0, 127), Number.NaN],
     [...alice.slice(0, 127), Infinity],
     [...alice.slice(0, 127), 99],
-    alice.map(v => v * 100),                         // scaled out of range
+    alice.map(v => v * 100),                         // scaled far out of range
   ];
   for (const d of bad) {
     assert.equal(identity.validDescriptor(d), false, `should refuse: ${JSON.stringify(d)?.slice(0, 48)}`);

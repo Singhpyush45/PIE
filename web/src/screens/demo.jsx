@@ -16,7 +16,7 @@ const STEPS = [
     say: 'Same axes, same scales. Different radar shapes can both be valid — this is diagnostic, not a league table.' },
   { act: 'Capability', role: 'recruiter', view: 'r-candidate',
     title: 'Open Meera’s profile',
-    say: 'A woman re-entering the workforce in a tier-2 city after a three-and-a-half year caregiving break — the exact persona the Hackfest brief names.' },
+    say: 'A woman re-entering the workforce in a tier-2 city after a three-and-a-half year caregiving break — the persona this product exists for.' },
   { act: 'Capability', role: 'recruiter', view: 'r-candidate',
     title: 'Show the evidence, then GitHub and project evidence',
     say: 'Seven possible sources. GitHub is API-derived, so it outranks a resume claim — but repository activity is supporting evidence, never proof of skill.' },
@@ -48,8 +48,8 @@ const STEPS = [
     title: 'Switch to Meera’s workspace',
     say: 'Same engine, her view. Her gap and her pathway are hers whether or not anyone shortlists her.' },
   { act: 'The candidate', role: 'candidate', view: 'c-learning',
-    title: 'Learning pathway → SAP Learning Hub',
-    say: 'Objectives routed to SAP Learning Hub, student edition. Read the completion notice — we do not claim an API we have not verified.' },
+    title: 'Learning pathway',
+    say: 'Objectives become a sequenced pathway. Read the completion notice — PIE only claims to verify what it can reassess.' },
   { act: 'The candidate', role: 'candidate', view: 'c-assess',
     title: 'Take the assessment: consent → device check → live',
     say: 'Consent first, with the timing and warning rules disclosed and frozen. Then the isolated assessment view — the sidebar is gone.' },
@@ -71,9 +71,9 @@ const STEPS = [
   { act: 'Governance', role: 'admin', view: 'a-audit',
     title: 'Audit trail',
     say: 'Every hop hashed and attributable, the AI recommendation recorded beside the human decision that overrode or accepted it.' },
-  { act: 'Close', role: '*', view: 'sap',
-    title: 'SAP integration readiness',
-    say: 'Where SAP is real today, where an adapter is ready, and where it is honestly a future integration.' },
+  { act: 'Close', role: '*', view: 'integrations',
+    title: 'Integrations',
+    say: 'Every row is the adapter\'s own answer. Connected means a real call came back, not that a key is present.' },
 ];
 
 export default function DemoMode({ ctx }) {
@@ -103,7 +103,7 @@ export default function DemoMode({ ctx }) {
         <div className="card__body">
           <Alert tone="ok" title="This runs with the network unplugged" icon="check">
             Every score, gap, ranking and audit signal is computed deterministically on the server.
-            The language model only narrates. If OpenAI, GitHub and SAP are all unreachable, the story
+            The language model only narrates. If OpenAI, GitHub and Corsair are all unreachable, the story
             is identical — the service chips simply read offline.
           </Alert>
           <div className="row row--wrap" style={{ gap: 10, marginTop: 14 }}>

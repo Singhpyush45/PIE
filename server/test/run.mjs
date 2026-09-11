@@ -42,8 +42,12 @@ const env = {
   // The suite asserts the deterministic engine, so keep the LLM out of it —
   // faster, free, and it removes a network dependency from your test results.
   OPENAI_API_KEY: '',
-  SAP_AI_CORE_DEPLOYMENT_URL: '',
-  SAP_AI_CORE_TOKEN: '',
+  // Every Corsair variable, not just the key: the adapter is only inert when
+  // it is fully unconfigured, and a developer's real .env leaking into a test
+  // run is exactly how a suite starts passing for the wrong reason.
+  CORSAIR_API_KEY: '', CORSAIR_SIGNING_SECRET: '', CORSAIR_KEK: '',
+  CORSAIR_DATABASE_URL: '', DATABASE_URL: '',
+  GMAIL_CLIENT_ID: '', GMAIL_CLIENT_SECRET: '', GMAIL_REDIRECT_URL: '',
   // Likewise: the GitHub tests assert the honest unconfigured behaviour.
   GITHUB_TOKEN: '',
   GITHUB_CLIENT_ID: '',
@@ -133,11 +137,11 @@ async function main() {
     'test/assessment.test.mjs',
     'test/execution.test.mjs',
     'test/checks.test.mjs',
+    'test/corsair.test.mjs',
+    'test/scout.test.mjs',
     'test/facewatch.test.mjs',
     'test/facedetect.test.mjs',
     'test/brief.test.mjs',
-    'test/hana.test.mjs',
-    'test/sapai.test.mjs',
   ];
 
   let code = 0;

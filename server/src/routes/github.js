@@ -9,6 +9,7 @@ import { requireAuth, requireRole, rateLimit, str, bad, sanitize } from '../lib.
 import { encryptSecret, decryptSecret, fingerprint } from '../secrets.js';
 import * as oauth from '../integrations/githubOAuth.js';
 import * as fixtures from '../integrations/githubEvidenceAdapter.js';
+import * as corsair from '../integrations/corsair.js';
 import { addEvidence } from './candidate.js';
 
 /** The stored connection for a candidate, or null. Never includes the token. */
@@ -30,6 +31,121 @@ function tokenFor(profileId) {
 
 export function registerGithubRoutes(app) {
   const asCandidate = [requireAuth, requireRole('candidate')];
+
+  /* --------------------------------------------------------------- corsair */
+  // A second, optional way for a candidate to authorise GitHub: Corsair Hub
+  // runs the OAuth handshake and the resulting credential is stored in PIE's
+  // own database, encrypted. PIE's first-party OAuth route above is unchanged
+  // and still takes precedence — this is an addition, not a replacement.
+  //
+  // Every response here is a state, never a credential.
+
+  app.get('/api/github/corsair', ...asCandidate, async (req, res) => {
+    const tenantId = corsair.tenantFor(req.user);
+    if (!corsair.isConfigured()) {
+      return res.json({ available: false, connected: false,
+        notice: 'Corsair is not configured on this server. Use "Connect GitHub" above, or add projects manually.' });
+    }
+    const r = await corsair.connectionStatus({ tenantId });
+    const state = r.ok ? (r.data?.github || 'not_connected') : 'not_connected';
+    res.json({
+      available: true,
+      connected: state === 'connected',
+      state,
+      // Said plainly, because it is the thing a candidate is being asked to
+      // trust, and it is enforced rather than promised.
+      guarantee: 'PIE reads your repository metadata. It cannot write to your GitHub — no commits, '
+        + 'issues, stars or forks — and you can disconnect at any time.',
+      // Not buried. The connect screen above asks for consent, and consent to
+      // something broader than it looks is not consent.
+      scopeNotice: 'Corsair\'s GitHub app asks for the repo, user and read:org scopes, which is more '
+        + 'access than PIE uses. PIE\'s own "Connect GitHub" asks for read:user only — prefer it if '
+        + 'you would rather grant less.',
+      ...(r.ok ? {} : { detail: r.detail || null }),
+    });
+  });
+
+  // Which plugins a candidate may connect. An allowlist rather than a
+  // pass-through: `plugin` arrives from the browser, and Corsair would happily
+  // issue a link for anything the server has configured.
+  const CONNECTABLE = ['github', 'gmail'];
+
+  app.post('/api/github/corsair/connect', ...asCandidate, rateLimit(10, 60_000), async (req, res) => {
+    const plugin = CONNECTABLE.includes(req.body?.plugin) ? req.body.plugin : 'github';
+    const r = await corsair.connectLink({ tenantId: corsair.tenantFor(req.user), plugin });
+    if (!r.ok) {
+      return res.status(r.reason === 'NOT_CONFIGURED' ? 409 : 502).json({
+        error: r.detail || 'A Corsair connect link could not be created.', code: r.reason,
+        recovery: 'Use "Connect GitHub" instead, or add projects manually — self-reported evidence still counts.',
+      });
+    }
+    db.audit({ actorId: req.user.id, action: 'github.corsair.connect_link',
+      subjectType: 'candidateProfile', subjectId: req.user.candidateProfileId,
+      meta: { plugin },
+      note: `A Corsair Hub connect link was issued for ${plugin}. No credential exists until the candidate completes it.` });
+    res.json({ connectUrl: r.connectUrl, expiresAt: r.expiresAt });
+  });
+
+  app.post('/api/github/corsair/disconnect', ...asCandidate, async (req, res) => {
+    const plugin = CONNECTABLE.includes(req.body?.plugin) ? req.body.plugin : 'github';
+    const r = await corsair.disconnect({ tenantId: corsair.tenantFor(req.user), plugin });
+    db.audit({ actorId: req.user.id, action: 'github.corsair.disconnect',
+      subjectType: 'candidateProfile', subjectId: req.user.candidateProfileId,
+      note: r.ok ? 'The stored Corsair GitHub authorisation was removed.' : `Disconnect refused: ${r.reason}` });
+    res.json({ ok: Boolean(r.ok), ...(r.ok ? {} : { detail: r.detail || null }) });
+  });
+
+  /* ------------------------------------------------------------------ scout */
+  /**
+   * Runs the Evidence Scout across whatever this candidate has connected.
+   *
+   * Candidate-initiated on purpose. A recruiter-triggered sweep of somebody's
+   * repositories and inbox is a different product with a different consent
+   * story; here the person whose accounts these are asks for the look, and the
+   * whole call log comes back to them.
+   *
+   * Slow by nature — up to eight live calls — so it is rate limited hard and
+   * returns the log rather than streaming.
+   */
+  app.post('/api/github/corsair/scout', ...asCandidate, rateLimit(6, 60_000), async (req, res) => {
+    const tenantId = corsair.tenantFor(req.user);
+
+    if (!corsair.isConfigured()) {
+      return res.status(409).json({
+        error: 'Corsair is not configured on this server, so there is nothing for the Scout to read.',
+        code: 'NOT_CONFIGURED',
+        recovery: 'Import repositories manually — self-reported evidence still counts.',
+      });
+    }
+
+    // Only look at what this candidate has actually authorised. Asking Corsair
+    // first also means the run reports "you have not connected anything" instead
+    // of eight identical failures.
+    const status = await corsair.connectionStatus({ tenantId });
+    const connected = status.ok
+      ? Object.entries(status.data || {}).filter(([, v]) => v === 'connected').map(([k]) => k)
+      : [];
+
+    const login = str(req.body?.login, 60)
+      || connectionFor(req.user.candidateProfileId)?.login
+      || null;
+
+    const targetSkills = Array.isArray(req.body?.targetSkills)
+      ? req.body.targetSkills.slice(0, 12).map(s => str(s, 40)).filter(Boolean)
+      : [];
+
+    const result = await corsair.scout({ tenantId, login, targetSkills, connected });
+
+    db.audit({
+      actorId: req.user.id, action: 'evidence.scout',
+      subjectType: 'candidateProfile', subjectId: req.user.candidateProfileId,
+      meta: { mode: result.mode, calls: result.callLog.length, connected },
+      note: `Evidence Scout ran in ${result.mode} mode: ${result.callLog.filter(c => c.ok).length} `
+        + `successful call(s) across ${connected.join(', ') || 'nothing'}. Every call is in the log.`,
+    });
+
+    res.json({ ...result, connected });
+  });
 
   /* ---------------------------------------------------------------- status */
   app.get('/api/github/status', requireAuth, (req, res) => {
@@ -100,9 +216,42 @@ export function registerGithubRoutes(app) {
       else db.insert('githubConnections', row);
 
       db.update('candidateProfiles', user.candidateProfileId, { githubLogin: identity.login });
+
+      // Hand the same token to Corsair, so one authorisation serves both paths.
+      //
+      // The candidate consented once, to PIE, for read:user. Corsair then gives
+      // PIE the tenant-scoped read layer, the synced-data side and the Evidence
+      // Scout's tools over exactly that grant — no second consent screen, no
+      // second token, and no Hub round trip that would need a tunnel to come
+      // back to a laptop.
+      //
+      // Best-effort on purpose. If Corsair is unconfigured or unreachable, the
+      // candidate's GitHub connection has still succeeded and everything that
+      // worked before still works; only the Corsair-powered extras are absent.
+      // A failure here must never turn a successful authorisation into an error
+      // page the candidate cannot act on.
+      let corsairLinked = false;
+      if (corsair.isConfigured()) {
+        const linked = await corsair.linkGithubToken({
+          tenantId: corsair.tenantFor({ ...user, candidateProfileId: user.candidateProfileId }),
+          token: accessToken,
+          login: identity.login,
+          scopes: scope || oauth.SCOPES.join(','),
+        });
+        corsairLinked = Boolean(linked.ok);
+        if (!linked.ok) {
+          console.warn(`[corsair] could not link @${identity.login}'s token: ${linked.reason}`);
+        }
+      }
+
       db.audit({ actor: user.email, actorRole: 'candidate', action: 'GITHUB_CONNECTED',
-        meta: { candidateProfileId: user.candidateProfileId, login: identity.login },
-        note: `GitHub account @${identity.login} authorized with read-only scopes. The access token is encrypted at rest and never sent to the browser.` });
+        meta: { candidateProfileId: user.candidateProfileId, login: identity.login, corsairLinked },
+        note: `GitHub account @${identity.login} authorized with read-only scopes. The access token is `
+          + `encrypted at rest and never sent to the browser.`
+          + (corsairLinked
+            ? ' The same grant was linked to this candidate\'s Corsair tenant, so evidence can be read '
+              + 'through Corsair without a second authorisation.'
+            : '') });
       return back(true);
     } catch (e) {
       return back(false, e.message);
@@ -130,14 +279,21 @@ export function registerGithubRoutes(app) {
       }
     }
 
-    // No real connection: labelled demo fixtures so the flow is demonstrable.
+    // No PIE OAuth connection. Corsair next, if this candidate has authorised
+    // through it; labelled demo fixtures otherwise, so the flow is demonstrable
+    // on a bad conference network.
     const username = str(req.query?.username, 60) || 'demo';
-    const fetched = await fixtures.fetchRepositories(username, { limit: 8 });
+    const fetched = await fixtures.fetchRepositories(username, {
+      limit: 8, tenantId: corsair.tenantFor(req.user),
+    });
+    const viaCorsair = fetched.mode === 'CORSAIR';
     res.json({
-      mode: 'DEMO_FIXTURES', login: null,
-      repositories: fetched.repositories.map(r => ({ ...r, fullName: `${username}/${r.name}`, visibility: 'public' })),
+      mode: viaCorsair ? 'CORSAIR' : 'DEMO_FIXTURES', login: viaCorsair ? username : null,
+      repositories: fetched.repositories.map(r => ({
+        ...r, fullName: r.fullName || `${username}/${r.name}`, visibility: r.visibility || 'public',
+      })),
       notice: fetched.notice,
-      demo: true,
+      demo: !viaCorsair,
     });
   });
 
@@ -161,7 +317,9 @@ export function registerGithubRoutes(app) {
           Object.assign(r, await oauth.enrichRepository(token, r.fullName));
         }
       } else {
-        const fetched = await fixtures.fetchRepositories(str(req.body?.username, 60) || 'demo', { limit: 8 });
+        const fetched = await fixtures.fetchRepositories(str(req.body?.username, 60) || 'demo', {
+          limit: 8, tenantId: corsair.tenantFor(req.user),
+        });
         mode = fetched.mode;
         selected = fetched.repositories
           .filter(r => wanted.includes(r.name) || wanted.includes(`demo/${r.name}`))

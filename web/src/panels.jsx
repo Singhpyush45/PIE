@@ -327,7 +327,7 @@ export function LearningPanel({ learning, gaps, delta, onReassess, busy, candida
         <Card><Stat label="Objectives" value={learning.objectives.length} tone="brand" icon="learn"
           detail="prerequisite-ordered" /></Card>
         <Card><Stat label="Estimated effort" value={`${learning.totalHours}h`} tone="ai" icon="clock" /></Card>
-        <Card><Stat label="SAP Learning Hub" value={learning.sapResourceCount} icon="book"
+        <Card><Stat label="PIE-verified" value={learning.verifiedResourceCount} icon="book"
           detail="student edition resources" /></Card>
       </div>
 
@@ -353,7 +353,7 @@ export function LearningPanel({ learning, gaps, delta, onReassess, busy, candida
             </div>
           </div>
           <Alert tone="info" title="What produced the new evidence">
-            The full orchestrator re-ran on the updated evidence profile. <b>SAP Learning Hub completion was not
+            The full orchestrator re-ran on the updated evidence profile. <b>External-provider completion was not
             asserted</b> — the new evidence comes from a PIE reassessment scored server-side, because no verified
             Learning Hub completion API exists.
           </Alert>
@@ -388,16 +388,17 @@ export function LearningPanel({ learning, gaps, delta, onReassess, busy, candida
             )}
             <div className="grid" style={{ gap: 10, marginTop: 12 }}>
               {o.resources.map(r => {
-                const isSap = r.provider === 'SAP_LEARNING_HUB';
-                const isPie = r.provider === 'PIE_PRACTICE';
+                // A PIE practice task is the only resource whose completion PIE
+                // can actually verify, so it is the one that gets the emphasis.
+                const isPractice = r.provider === 'PIE_PRACTICE';
                 return (
                   <div key={r.resource_id} style={{
-                    border: `1px solid ${isSap ? 'var(--accent-500)' : 'var(--line-2)'}`,
+                    border: `1px solid ${isPractice ? 'var(--accent-500)' : 'var(--line-2)'}`,
                     borderRadius: 'var(--r-md)', padding: 'var(--s-4)',
-                    background: isSap ? 'var(--accent-50)' : 'var(--surface-2)',
+                    background: isPractice ? 'var(--accent-50)' : 'var(--surface-2)',
                   }}>
                     <div className="row row--wrap" style={{ gap: 8, marginBottom: 8 }}>
-                      <Badge tone={isSap ? 'sap' : isPie ? 'ok' : 'neutral'} icon={isSap ? 'book' : isPie ? 'target' : 'ext'}>
+                      <Badge tone={isPractice ? 'ok' : 'neutral'} icon={isPractice ? 'target' : 'ext'}>
                         {r.providerName}
                       </Badge>
                       <Badge tone="neutral">{r.learning_type}</Badge>
@@ -428,7 +429,7 @@ export function LearningPanel({ learning, gaps, delta, onReassess, busy, candida
         </Card>
       ))}
 
-      <Alert tone="info" title="SAP Learning Hub integration model">{learning.integrationNotice}</Alert>
+      <Alert tone="info" title="What PIE can and cannot verify">{learning.integrationNotice}</Alert>
     </div>
   );
 }

@@ -92,7 +92,7 @@ export function registerAuthRoutes(app) {
     // account is created and signed in as before and the response says plainly
     // that the address is unverified. Pretending to have sent an email nobody
     // can receive would be worse than admitting the gap.
-    if (role === 'candidate' && mailer.isConfigured()) {
+    if (role === 'candidate' && otp.REQUIRED() && mailer.isConfigured()) {
       const issued = otp.request({ email, userId: user.id, purpose: 'REGISTRATION' });
       if (!issued.ok) {
         return res.status(429).json({ error: issued.detail, reason: issued.reason });
@@ -134,10 +134,13 @@ export function registerAuthRoutes(app) {
       token, expiresAt, user: sessionUser(user),
       requiresEmailVerification: false,
       emailVerificationUnavailable: role === 'candidate' ? true : undefined,
-      notice: role === 'candidate'
-        ? 'Email verification is not available on this deployment (no mail transport is configured), '
-          + 'so this address has not been proven. Set SMTP_HOST, SMTP_USER, SMTP_PASS and SMTP_FROM to enable it.'
-        : undefined,
+      notice: role !== 'candidate' ? undefined
+        : !otp.REQUIRED()
+          ? 'Email verification is switched off on this deployment (EMAIL_VERIFICATION=off), so this '
+            + 'address has not been proven.'
+          : 'Email verification is not available on this deployment (no mail transport is configured), '
+            + 'so this address has not been proven. Set SMTP_HOST, SMTP_USER, SMTP_PASS and SMTP_FROM, '
+            + 'or MAIL_HTTP_PROVIDER, to enable it.',
     });
   });
 
@@ -159,6 +162,11 @@ export function registerAuthRoutes(app) {
       ok: true,
       notice: 'If that address has an account awaiting verification, a new code is on its way.',
     };
+    if (!otp.REQUIRED()) {
+      return res.status(503).json({
+        error: 'Email verification is switched off on this deployment.', reason: 'VERIFICATION_OFF',
+      });
+    }
     if (!user || user.role !== 'candidate' || user.emailVerified) return res.json(generic);
     if (!mailer.isConfigured()) {
       return res.status(503).json({
@@ -240,7 +248,11 @@ export function registerAuthRoutes(app) {
   app.get('/api/auth/verify-email/state', rateLimit(60, 60_000), (req, res) => {
     const email = str(req.query?.email, 200).toLowerCase();
     if (!isEmail(email)) return bad(res, 'Please enter a valid email address.');
-    res.json({ ...otp.publicState(email), mailConfigured: mailer.isConfigured() });
+    res.json({
+      ...otp.publicState(email),
+      mailConfigured: mailer.isConfigured(),
+      required: otp.REQUIRED(),
+    });
   });
 
   /* ---------------------------------------------------------------- login */

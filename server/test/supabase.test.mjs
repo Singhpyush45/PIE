@@ -158,21 +158,16 @@ test('8 — no verification result ever carries the key or the raw URL', async (
 /* ═════════════════════════════════════════════════════ AI PROVIDER CHAIN */
 
 async function providersWith(envs) {
-  for (const k of ['SAP_AI_CORE_DEPLOYMENT_URL', 'SAP_AI_CORE_TOKEN', 'OPENAI_API_KEY',
-    'GEMINI_API_KEY', 'OLLAMA_BASE_URL']) delete process.env[k];
+  for (const k of ['OPENAI_API_KEY', 'GEMINI_API_KEY', 'OLLAMA_BASE_URL']) delete process.env[k];
   Object.assign(process.env, envs);
   return import(`../src/ai/provider.js?c=${Math.random()}`);
 }
 
-test('9 — the provider order is SAP, then OpenAI, then Gemini, then a local model', async () => {
+test('9 — the provider order is OpenAI, then Gemini, then a local model', async () => {
   const all = await providersWith({
-    SAP_AI_CORE_DEPLOYMENT_URL: 'https://x/y', SAP_AI_CORE_TOKEN: 't',
     OPENAI_API_KEY: 'sk-x', GEMINI_API_KEY: 'g-x', OLLAMA_BASE_URL: 'http://localhost:11434/v1',
   });
-  assert.equal(all.providerStatus().providerKey, 'sap_genai_hub', 'SAP wins when configured');
-
-  const noSap = await providersWith({ OPENAI_API_KEY: 'sk-x', GEMINI_API_KEY: 'g-x' });
-  assert.equal(noSap.providerStatus().providerKey, 'openai');
+  assert.equal(all.providerStatus().providerKey, 'openai', 'the first configured provider wins');
 
   const geminiOnly = await providersWith({ GEMINI_API_KEY: 'g-x' });
   assert.equal(geminiOnly.providerStatus().providerKey, 'gemini');
@@ -197,7 +192,7 @@ test('11 — a local model is reported as keeping data on your own infrastructur
   const ollama = land.providers.find(p => p.key === 'ollama');
   assert.equal(ollama.state, 'ACTIVE');
   assert.equal(ollama.dataLeavesMachine, false, 'this is the claim the pitch rests on');
-  for (const k of ['openai', 'gemini', 'sap_genai_hub']) {
+  for (const k of ['openai', 'gemini']) {
     assert.equal(land.providers.find(p => p.key === k).dataLeavesMachine, true,
       `${k} sends data off the machine and must say so`);
   }

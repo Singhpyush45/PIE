@@ -39,9 +39,22 @@ for (const file of CANDIDATES) {
 
 /** Keys we care about, grouped for a readable startup banner. */
 const GROUPS = {
-  'AI provider': ['SAP_AI_CORE_DEPLOYMENT_URL', 'SAP_AI_CORE_TOKEN', 'OPENAI_API_KEY'],
-  GitHub: ['GITHUB_TOKEN'],
-  'SAP enterprise': ['SAP_BTP_CAP_URL', 'SAP_HANA_HOST', 'SF_API_URL', 'SAC_TENANT_URL'],
+  'AI provider': ['AI_PROVIDER', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'OLLAMA_BASE_URL'],
+  GitHub: ['GITHUB_TOKEN', 'GITHUB_CLIENT_ID', 'GITHUB_CALLBACK_URL'],
+  // All four are required together: the SDK runs in-process, so it needs the
+  // Hub credentials AND the key that encrypts stored authorisations AND a real
+  // Postgres connection. Three out of four is not a working integration.
+  Corsair: ['CORSAIR_API_KEY', 'CORSAIR_SIGNING_SECRET', 'CORSAIR_KEK', 'CORSAIR_DATABASE_URL'],
+  // Gmail is a Corsair plugin, but its credentials are yours: it has no managed
+  // auth type, so this is a Google Cloud OAuth client you registered.
+  'Gmail (via Corsair)': ['GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REDIRECT_URL'],
+  // Mail and persistence were missing here, and their absence was the reason
+  // "is my .env even being read?" was hard to answer: the banner listed AI and
+  // GitHub and said nothing about the two things most likely to be wrong.
+  Mail: ['SMTP_HOST', 'SMTP_USER', 'SMTP_FROM', 'MAIL_HTTP_PROVIDER', 'MAIL_FROM',
+    'RESEND_API_KEY', 'BREVO_API_KEY', 'EMAIL_VERIFICATION'],
+  Persistence: ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_MIRROR', 'SUPABASE_HYDRATE'],
+  App: ['APP_BASE_URL', 'ADMIN_PASSWORD', 'TOKEN_ENCRYPTION_KEY', 'NODE_ENV'],
 };
 
 const isSet = k => Boolean((process.env[k] || '').trim());
@@ -61,7 +74,11 @@ export function printEnvBanner() {
   if (loaded.length) {
     for (const f of loaded) console.log(`  env: loaded ${path.relative(process.cwd(), f)}`);
   } else {
+    // Where it looked, not just that it found nothing. "No .env file found" on
+    // its own sends people to check the file they are staring at, rather than
+    // the two paths that are actually consulted.
     console.log('  env: no .env file found — running on deterministic defaults (this is fine)');
+    for (const f of CANDIDATES) console.log(`  env:   looked for ${f}`);
   }
   for (const [group, keys] of Object.entries(GROUPS)) {
     const set = keys.filter(isSet);

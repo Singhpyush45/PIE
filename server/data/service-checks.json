@@ -42,32 +42,34 @@
     "at": "2026-08-31T17:25:52.469Z"
   },
   "supabase_hydrate": {
-    "ok": false,
-    "detail": "Restored 1838 row(s) from ahvdxtujykurxnsnzwha.supabase.co: 12 organizations, 47 users, 12 recruiters, 37 candidateProfiles, 39 evidence, 1 githubConnections, 17 githubRepositories, 120 agentRuns, 120 matchResults, 24 assessmentAttempts, 22 proctoringEvents, 109 biasAudits, 11 humanDecisions, 6 learningProgress, 1261 auditEvents.",
+    "ok": true,
+    "detail": "Nothing to restore — ahvdxtujykurxnsnzwha.supabase.co holds no PIE rows this store does not already have.",
     "config": "3fb4a031e597e007",
     "meta": {
-      "restored": {
-        "organizations": 12,
-        "users": 47,
-        "recruiters": 12,
-        "candidateProfiles": 37,
-        "evidence": 39,
-        "githubConnections": 1,
-        "githubRepositories": 17,
-        "agentRuns": 120,
-        "matchResults": 120,
-        "assessmentAttempts": 24,
-        "proctoringEvents": 22,
-        "biasAudits": 109,
-        "humanDecisions": 11,
-        "learningProgress": 6,
-        "auditEvents": 1261
-      },
-      "skipped": 2020,
-      "failed": {
-        "face_identities": "Supabase GET face_identities → 404: Could not find the table 'public.face_identities' in the schema cache"
-      }
+      "restored": {},
+      "skipped": 3967,
+      "failed": {}
     },
-    "at": "2026-09-03T03:51:30.918Z"
+    "at": "2026-09-11T03:24:21.582Z"
+  },
+  "corsair": {
+    "ok": true,
+    "detail": "Corsair is live against PIE's database — corsair_accounts read, 1 tenant(s). 1 plugin(s): github.",
+    "config": "0c7e26f91fa7bbb6",
+    "meta": {
+      "plugins": [
+        "github"
+      ],
+      "unconfigured": [],
+      "tenants": 1
+    },
+    "at": "2026-09-10T19:13:08.881Z"
+  },
+  "corsair-github-link": {
+    "ok": true,
+    "detail": "A GitHub token was linked to a Corsair tenant.",
+    "config": "0c7e26f91fa7bbb6",
+    "meta": null,
+    "at": "2026-09-11T03:04:17.423Z"
   }
 }

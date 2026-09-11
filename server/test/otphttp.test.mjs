@@ -12,7 +12,7 @@
 
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { startPie, uniq } from './harness/pieServer.mjs';
+import { startPie, uniq, personDescriptor } from './harness/pieServer.mjs';
 
 let pie = null;
 const api = (...a) => pie.api(...a);
@@ -184,4 +184,65 @@ test('9 — the verification state endpoint leaks nothing', async () => {
   const wire = JSON.stringify(s.data);
   assert.ok(!wire.includes(code), 'the state endpoint must not hand out the code');
   assert.ok(!/hash|ticket/i.test(wire));
+});
+
+/* ────────────────────────────────────────────────────── the off switch
+   A mail server that is not delivering leaves a candidate with an account they
+   cannot use, which on a demo day is worse than not checking the address at
+   all. EMAIL_VERIFICATION=off is the way out that does not involve deleting a
+   working feature — and these tests are what stop it becoming a hole nobody
+   noticed: it must switch off the whole step cleanly, and it must be visible. */
+test('10 — EMAIL_VERIFICATION=off signs candidates in and asks for nothing', async () => {
+  const off = await startPie({ name: 'otp-off', env: { EMAIL_VERIFICATION: 'off' } });
+  try {
+    const tag = uniq();
+    const who = {
+      role: 'candidate', name: `Off ${tag}`, username: `off${tag}`,
+      email: `off${tag}@example.test`,
+      password: `Str0ng-${tag}`, confirmPassword: `Str0ng-${tag}`,
+    };
+    const r = await off.api('/api/auth/register', { method: 'POST', body: who });
+
+    assert.equal(r.status, 201);
+    assert.equal(r.data.requiresEmailVerification, false);
+    assert.ok(r.data.user, 'the candidate is signed in at registration, as before the feature existed');
+    assert.ok(r.setCookie, 'and gets a session cookie');
+    assert.equal(off.codeFor(who.email), null, 'no code was sent — the mail server is configured but unused');
+    assert.match(r.data.notice, /switched off/i,
+      'and the response says the address was not proven, rather than staying quiet about it');
+
+    // The gates behind it stop demanding a verified email, or the switch would
+    // move the dead end from registration to the assessment.
+    const identity = await off.api('/api/candidate/identity', { token: r.data.token });
+    assert.equal(identity.status, 200);
+    assert.equal(identity.data.emailVerificationEnforced, false);
+    assert.equal(identity.data.emailVerified, true, 'treated as satisfied, because it cannot be asked for');
+
+    const reg = await off.api('/api/candidate/identity/register', {
+      method: 'POST', token: r.data.token, body: { descriptor: personDescriptor(Math.random()) },
+    });
+    assert.equal(reg.status, 201, `identity registration must not be blocked: ${JSON.stringify(reg.data)}`);
+
+    // And asking for a code says so plainly rather than pretending to send one.
+    const ask = await off.api('/api/auth/verify-email/request', { method: 'POST', body: { email: who.email } });
+    assert.equal(ask.status, 503);
+    assert.equal(ask.data.reason, 'VERIFICATION_OFF');
+  } finally { await off.stop(); }
+});
+
+test('11 — switching it off is visible in the integrity panel, not silent', async () => {
+  const off = await startPie({ name: 'otp-off2', env: { EMAIL_VERIFICATION: 'off' } });
+  try {
+    const login = await off.api('/api/auth/login', {
+      method: 'POST', body: { identifier: 'admin', password: 'test-only-Adm1n-password' },
+    });
+    assert.equal(login.status, 200);
+    const services = await off.api('/api/services', { token: login.data.token });
+    const row = services.data.services.find(s => s.key === 'email_verification');
+
+    assert.ok(row, 'email verification has its own line — it is a different claim from "we can send email"');
+    assert.equal(row.state, 'OFF');
+    assert.match(row.detail, /NOT proven/,
+      'and it says what is no longer being checked, in those words');
+  } finally { await off.stop(); }
 });

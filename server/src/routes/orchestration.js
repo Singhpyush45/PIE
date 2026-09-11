@@ -228,7 +228,7 @@ app.post('/api/runs/:id/decision', requireAuth, requireRole('recruiter', 'admin'
     const profileId = run.candidate.id;
     const practice = objective.resources.find(r => r.completion_verification === 'PIE_REASSESSMENT');
 
-    // New, verifiable evidence. SAP Learning Hub completion is deliberately NOT asserted.
+    // New, verifiable evidence. External-provider completion is deliberately NOT asserted.
     const ev = db.insert('evidence', {
       candidateProfileId: profileId,
       type: 'assessment', source: 'assessment',
@@ -245,7 +245,7 @@ app.post('/api/runs/:id/decision', requireAuth, requireRole('recruiter', 'admin'
     db.audit({ actor: req.user.email, actorRole: req.user.role, action: 'REASSESSMENT_COMPLETED',
       subjectType: 'evidence', subjectId: ev.id,
       meta: { candidateProfileId: profileId, skillId },
-      note: `New API-derived evidence for ${objective.skill}. SAP Learning Hub completion was NOT asserted — no verified completion API exists.` });
+      note: `New API-derived evidence for ${objective.skill}. External-provider completion was NOT asserted — PIE has no verified completion API for one.` });
 
     const candidate = materializeCandidate(profileId);
     const requisition = run.requisition ? db.findById('requisitions', run.requisition.id) : null;

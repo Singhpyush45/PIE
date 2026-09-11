@@ -208,14 +208,24 @@ test('AI failure falls back without breaking the run', async () => {
 });
 
 /* ----------------------------------------------------------------- 11 */
-test('SAP adapters report honestly and never claim unavailable connectivity', async () => {
+test('integrations report honestly and never claim connectivity they lack', async () => {
   const anon = await api('/api/services');
   assert.equal(anon.status, 401, 'the service landscape must require a session');
   const r = await api('/api/services', { token: adminToken });
-  const byName = Object.fromEntries(r.data.services.map(s => [s.name, s]));
-  assert.equal(byName['SAP SuccessFactors / Talent Intelligence Hub'].state, 'FUTURE_INTEGRATION');
-  assert.equal(byName['SAP Learning Hub, student edition'].state, 'LINK_REDIRECTION_ACTIVE');
-  for (const s of r.data.services) assert.ok(s.state !== 'CONNECTED' || s.detail, 'a CONNECTED claim needs detail');
+  const byKey = Object.fromEntries(r.data.services.map(s => [s.key, s]));
+
+  // Nothing is configured on the test server, so nothing may say it is connected.
+  assert.equal(byKey.corsair.state, 'NOT_CONFIGURED');
+  assert.match(byKey.corsair.detail, /own OAuth adapter/,
+    'and it must say what PIE falls back to, not just that it is off');
+
+  // The rule the whole panel rests on: a CONNECTED claim must carry evidence.
+  for (const s of r.data.services) {
+    assert.ok(s.state !== 'CONNECTED' || s.detail, `${s.key}: a CONNECTED claim needs detail`);
+  }
+  // And no key ever reaches the panel.
+  const wire = JSON.stringify(r.data);
+  assert.ok(!/sk-|ck_live|ck_dev|service_role/.test(wire), 'no credential may appear in the landscape');
 });
 
 /* ----------------------------------------------------------------- 12 */

@@ -24,24 +24,41 @@ import crypto from 'node:crypto';
 import * as db from './store.js';
 
 export const ALGORITHM = 'face-api/faceRecognitionNet';
-export const TEMPLATE_VERSION = '1';
+export const TEMPLATE_VERSION = '2';
 export const DIMENSIONS = 128;
 
 /**
  * Distance below which two descriptors are the same person.
  *
+ * 0.6 is what this model family is characterised at, for the descriptor exactly
+ * as the model produces it. Both sides of every comparison must therefore be
+ * raw model output: nothing in PIE rescales a descriptor, because doing it to
+ * one side and not the other moves the distance further than two different
+ * faces do.
+ *
  * Must equal MATCH_THRESHOLD in web/src/faceIdentity.js. The browser shows a
  * preview of the decision; the server makes it. If the two ever drift, the
  * preview lies — so a test asserts they are equal.
  */
-export const MATCH_THRESHOLD = 0.55;
+export const MATCH_THRESHOLD = 0.6;
 
 /** How long a passed check is good for, and what it may be used for. */
 export const CHECK_TTL_MS = Number(process.env.PIE_IDENTITY_TICKET_TTL_MS || 3 * 60_000);
 
 /* ------------------------------------------------------------- descriptors */
-/** A descriptor is 128 finite numbers, roughly unit length. Anything else is
- *  not a face — it is someone poking at the endpoint. */
+/**
+ * Is this 128 numbers that could have come from the model?
+ *
+ * The bound is deliberately generous. An earlier version required a norm
+ * between 0.85 and 1.15 on the belief that the model L2-normalises its output.
+ * It does not: real descriptors measure around 1.39, so that check rejected
+ * every genuine live capture as BAD_DESCRIPTOR while letting registration
+ * through — because registration was rescaling its template to exactly 1 first.
+ *
+ * What this still has to catch is real: face-api returns an all-zero descriptor
+ * for a degenerate input, and storing that as somebody's face would match
+ * everyone. So the floor matters more than the ceiling.
+ */
 export function validDescriptor(d) {
   if (!Array.isArray(d) || d.length !== DIMENSIONS) return false;
   let sum = 0;
@@ -49,11 +66,8 @@ export function validDescriptor(d) {
     if (typeof v !== 'number' || !Number.isFinite(v) || Math.abs(v) > 4) return false;
     sum += v * v;
   }
-  // The model L2-normalises its output, so a real descriptor has length very
-  // close to 1. A loose window here would accept a vector of small constants —
-  // which is what an endpoint prober sends — and store it as somebody's face.
   const norm = Math.sqrt(sum);
-  return norm > 0.85 && norm < 1.15;
+  return norm > 0.3 && norm < 4;
 }
 
 export function distance(a, b) {

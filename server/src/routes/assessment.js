@@ -6,6 +6,10 @@
 import * as db from '../store.js';
 import * as identity from '../faceIdentity.js';
 import * as mailer from '../mailer.js';
+import * as otp from '../emailVerification.js';
+
+/** Email is only a precondition where a code can actually be asked for. */
+const emailGateApplies = () => otp.REQUIRED() && mailer.isConfigured();
 import {
   requireAuth, requireRole, rateLimit, str, bad,
   materializeCandidate, publicApp, advanceApplication,
@@ -98,7 +102,7 @@ export function registerAssessmentRoutes(app) {
     rateLimit(6, 60_000), (req, res) => {
       const user = db.findById('users', req.user.id);
       if (!user) return res.status(401).json({ error: 'Sign in again.' });
-      if (mailer.isConfigured() && !user.emailVerified && !user.isDemo) {
+      if (emailGateApplies() && !user.emailVerified && !user.isDemo) {
         return res.status(403).json({
           error: 'Verify your email address before starting an assessment.', reason: 'EMAIL_UNVERIFIED' });
       }
@@ -122,6 +126,24 @@ export function registerAssessmentRoutes(app) {
           : `Live identity check refused: ${r.reason}. No assessment session was created.`,
       });
 
+      // A template PIE can no longer compare is not a failed check — it is a
+      // template that has to be replaced. Leaving it in place would refuse the
+      // candidate forever with a message about their face, so it is cleared here
+      // and they are told to register again. Only PIE decides a version is
+      // retired; nothing a candidate sends can trigger this.
+      if (!r.ok && r.reason === 'STALE_TEMPLATE') {
+        identity.unlock(req.user.candidateProfileId);
+        db.audit({ actor: user.email, actorRole: 'candidate', action: 'IDENTITY_RESET_STALE',
+          subjectType: 'candidateProfile', subjectId: req.user.candidateProfileId,
+          note: 'A registered identity from a retired template version was cleared so the candidate '
+            + 'can register again. It could not be compared, so keeping it would have refused them '
+            + 'every assessment with no way out.' });
+        return res.status(409).json({
+          error: 'Your registered identity was created by an earlier version of PIE and can no longer '
+            + 'be compared. It has been cleared — please register your identity again from your profile.',
+          reason: 'NOT_REGISTERED',
+        });
+      }
       if (!r.ok) {
         const code = r.reason === 'NOT_REGISTERED' ? 409 : 403;
         return res.status(code).json({ error: r.detail, reason: r.reason, distance: r.distance ?? null });
@@ -160,7 +182,7 @@ export function registerAssessmentRoutes(app) {
       // can pass is not security, it is an outage. The integrity panel says
       // plainly when it is unenforced, and configuring SMTP turns it on with
       // no code change.
-      if (mailer.isConfigured() && !gateUser.emailVerified) {
+      if (emailGateApplies() && !gateUser.emailVerified) {
         return res.status(403).json({
           error: 'Verify your email address before starting an assessment.',
           reason: 'EMAIL_UNVERIFIED' });

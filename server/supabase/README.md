@@ -28,7 +28,7 @@ every request comes back `403 permission denied for table … (42501)`.
    one anyway). Key on one line, no quotes, nothing after it.
 5. Check it: `cd server && node tools/supabase-doctor.mjs` — reports the URL shape, the key's
    type and role, and one live request, without ever printing the key.
-6. Restart the server, sign in as the administrator, open **SAP integration readiness →
+6. Restart the server, sign in as the administrator, open **Integrations →
    Where PIE's data lives → Verify connection**.
 
 ## If something is wrong, what the state means

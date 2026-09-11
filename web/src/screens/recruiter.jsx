@@ -1206,7 +1206,7 @@ function OrchestratorView({ ctx, runs, phase, orchestrate, busy, reqId, setAgent
         <div className="card__body">
           <div className="tablewrap">
             <table className="dt">
-              <thead><tr><th>PIE component</th><th>Kind</th><th>Hackfest handbook role</th><th>Responsibility</th></tr></thead>
+              <thead><tr><th>PIE component</th><th>Kind</th><th>Architecture role</th><th>Responsibility</th></tr></thead>
               <tbody>{(ctx.boot.pipeline || []).map(s => (
                 <tr key={s.key}>
                   <td><b>{s.name}</b></td>
@@ -1218,7 +1218,7 @@ function OrchestratorView({ ctx, runs, phase, orchestrate, busy, reqId, setAgent
             </table>
           </div>
           <Alert tone="neutral" title="Why this mapping exists">
-            The pitch deck names four specialised agents; the Hackfest handbook names six functions for
+            The pitch deck names four specialised agents; the architecture names six functions for
             Theme 2. PIE keeps the four agents as the core AI model and implements the remaining
             handbook functions as orchestrator services with the same rigour — manifests, scoped
             inputs, validation and audit.
