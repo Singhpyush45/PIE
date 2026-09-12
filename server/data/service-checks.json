@@ -42,21 +42,37 @@
     "at": "2026-08-31T17:25:52.469Z"
   },
   "supabase_hydrate": {
-    "ok": true,
-    "detail": "Restored 18 row(s) from ahvdxtujykurxnsnzwha.supabase.co: 2 candidateProfiles, 1 githubConnections, 1 agentRuns, 1 matchResults, 13 auditEvents.",
+    "ok": false,
+    "detail": "Could not read 21 table(s) from ahvdxtujykurxnsnzwha.supabase.co. Run server/supabase/schema.sql, grants.sql, 002_mirror.sql and 003_auth.sql, then restart.",
     "config": "3fb4a031e597e007",
     "meta": {
-      "restored": {
-        "candidateProfiles": 2,
-        "githubConnections": 1,
-        "agentRuns": 1,
-        "matchResults": 1,
-        "auditEvents": 13
-      },
-      "skipped": 4298,
-      "failed": {}
+      "restored": {},
+      "skipped": 0,
+      "failed": {
+        "organizations": "fetch failed",
+        "profiles": "fetch failed",
+        "recruiter_profiles": "fetch failed",
+        "candidate_profiles": "fetch failed",
+        "face_identities": "fetch failed",
+        "requisitions": "fetch failed",
+        "applications": "fetch failed",
+        "evidence": "fetch failed",
+        "github_connections": "fetch failed",
+        "github_repositories": "fetch failed",
+        "projects": "fetch failed",
+        "certificates": "fetch failed",
+        "hackathons": "fetch failed",
+        "agent_runs": "fetch failed",
+        "match_results": "fetch failed",
+        "assessment_attempts": "fetch failed",
+        "proctoring_events": "fetch failed",
+        "bias_audits": "fetch failed",
+        "human_decisions": "fetch failed",
+        "learning_progress": "fetch failed",
+        "audit_events": "fetch failed"
+      }
     },
-    "at": "2026-09-11T10:05:42.205Z"
+    "at": "2026-09-12T06:57:40.315Z"
   },
   "corsair": {
     "ok": true,
